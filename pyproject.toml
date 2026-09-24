@@ -2,4 +2,23 @@
 name = "optipilot"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "numpy>=2.4",
+    "opencv-python-headless>=4.13",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+markers = [
+    "footage: validación con footage real (opt-in vía OPTIPILOT_VIDEO_DIR)",
+    "perf: benchmark de latencia (no bloqueante)",
+]

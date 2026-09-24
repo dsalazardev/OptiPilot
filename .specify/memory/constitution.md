@@ -2,20 +2,20 @@
 
 <!--
 Sync Impact Report
-- Version change: plantilla sin ratificar (sin versión) → 1.0.0
-- Modified principles: la plantilla genérica se reemplaza por 6 principios propios:
-  I.  Restricción Técnica Absoluta: Visión Clásica (NON-NEGOTIABLE)
-  II. Arquitectura de Pipeline Explícito por Etapas
-  III. Organización del Código y Dependencias Reproducibles
-  IV. Tiempo Real y Comportamiento Determinista
-  V.  Calidad Verificable: Pruebas y Evidencia Medible
-  VI. Trazabilidad Documental y Proceso OpenSpec
-- Added sections: Restricciones Técnicas y de Plataforma; Flujo de Desarrollo y Puertas de Calidad
+- Version change: 1.0.0 → 2.0.0
+- Modified principles: VI. «Trazabilidad Documental y Proceso OpenSpec» → VI. «Trazabilidad
+  Documental y Proceso de Planificación (Spec Kit)»
+- Modified sections: Governance (herramienta vigente y enmiendas); Flujo de Desarrollo y Puertas de
+  Calidad (evidencia de estado con artefactos de Spec Kit)
+- Added sections: ninguna
 - Removed sections: ninguna
-- Follow-up TODOs: ninguno. No quedan placeholders. La duración de la parada PARE (definida por el
-  docente) y el hardware, cámara y comunicación del robot se tratan como parámetros y decisiones a
-  resolver en el cambio que los necesite (Principio IV y sección de Plataforma), no como incógnitas
-  constitucionales.
+- Rationale: reconocer Spec Kit (adoptado en el commit `docs(spec-kit)`; constitución en
+  `.specify/memory/constitution.md`; artefactos en `specs/###-feature/`) como herramienta activa de
+  gobernanza y planificación; OpenSpec pasa a herramienta complementaria sin duplicar trabajo.
+  Bump MAJOR por redefinición del flujo de gobernanza exigido (Principio VI).
+- Follow-up TODOs: alinear las referencias a OpenSpec en `AGENTS.md` en un cambio subsecuente.
+- Historial: v1.0.0 (2026-09-24) — ratificación inicial (6 principios, restricciones técnicas y
+  puertas de calidad).
 -->
 
 ## Core Principles
@@ -124,12 +124,14 @@ esas métricas y explicarlas.
 limitaciones (criterios 7 y 11); sin evidencia verificable no hay puntaje, y sin pruebas la
 depuración en pista se vuelve manual e inestable.
 
-### VI. Trazabilidad Documental y Proceso OpenSpec
+### VI. Trazabilidad Documental y Proceso de Planificación (Spec Kit)
 
 - `documents/**` es la fuente de verdad académica del reto y MUST tratarse como material de solo
   lectura; no se reescribe sin justificación y aprobación explícitas.
-- Todo trabajo no trivial MUST pasar por el flujo OpenSpec (propuesta → especificación y tareas →
-  implementación → archivo); la implementación se realiza solo cuando existen tareas aprobadas.
+- Todo trabajo no trivial MUST pasar por el flujo de planificación vigente — Spec Kit (spec → plan →
+  tasks → implementación; artefactos en `specs/###-feature/`) —; la implementación se realiza solo
+  cuando existen tareas aprobadas. OpenSpec se mantiene como herramienta complementaria y no se
+  duplica el trabajo entre ambos flujos.
 - Cada cambio MUST declarar qué etapas del pipeline implementa y qué técnicas autorizadas usa; esa
   trazabilidad alimenta el póster, la defensa oral y la revisión de cumplimiento.
 - Los vacíos, conflictos o inconsistencias documentales MUST registrarse (por ejemplo, en la
@@ -171,7 +173,7 @@ implemente la lógica correspondiente.
 
 **Antes de implementar** (basado en la checklist operativa de `AGENTS.md`):
 
-1. Verificar el estado real con evidencia (archivos, `git`, `openspec list`) y clasificarlo
+1. Verificar el estado real con evidencia (archivos, `git`, artefactos de `specs/`) y clasificarlo
    (implementado / parcial / solo documentado / planificado / indeterminado); está prohibido
    promover documentación a «implementado».
 2. Confirmar que el cambio usa cero técnicas prohibidas y solo técnicas autorizadas; ante duda,
@@ -205,13 +207,17 @@ implemente la lógica correspondiente.
   notebooks > comentarios > historial. Para requisitos y restricciones, los documentos oficiales
   del reto prevalecen sobre todo lo demás, incluido el código: código que viole el Reto 1 es no
   conforme por definición.
-- **Enmiendas**: toda modificación requiere (a) propuesta documentada (un cambio OpenSpec o
-  justificación equivalente), (b) aprobación del responsable del proyecto, (c) plan de migración
-  cuando cambie prácticas existentes, y (d) incremento de versión con actualización de
+- **Enmiendas**: toda modificación requiere (a) propuesta documentada (un cambio en el flujo vigente
+  —Spec Kit— o justificación equivalente), (b) aprobación del responsable del proyecto, (c) plan de
+  migración cuando cambie prácticas existentes, y (d) incremento de versión con actualización de
   `Last Amended` en la línea de versión.
 - **Versionado semántico**: MAJOR para eliminación o redefinición incompatible de principios o
   gobernanza; MINOR para un nuevo principio, sección o expansión material; PATCH para aclaraciones
   y correcciones sin cambio de significado.
+- **Herramienta vigente de gobernanza**: Spec Kit es la herramienta activa de planificación y
+  trazabilidad (constitución en `.specify/memory/constitution.md`; especificaciones, planes y tareas
+  en `specs/`). Sus comandos y artefactos (`/speckit.*`) son el mecanismo de gobernanza de los
+  cambios; OpenSpec queda disponible para su propio ciclo, sin obligación de duplicación.
 - **Revisión de cumplimiento**: toda revisión o PR MUST verificar el cumplimiento de los
   principios. Las violaciones que la constitución permite justificar MUST justificarse
   explícitamente en la sección Complexity Tracking del plan; en caso contrario, el cambio no se
@@ -221,4 +227,4 @@ implemente la lógica correspondiente.
 - Los vacíos del reto dependientes del docente (duración de PARE, geometría de la pista, número de
   intentos) MUST registrarse como riesgos y resolverse con el docente; MUST NOT silenciarse.
 
-**Version**: 1.0.0 | **Ratified**: 2026-09-24 | **Last Amended**: 2026-09-24
+**Version**: 2.0.0 | **Ratified**: 2026-09-24 | **Last Amended**: 2026-09-24

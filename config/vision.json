@@ -1,0 +1,22 @@
+{
+  "roi_linea": { "x": 0.15, "y": 0.55, "w": 0.70, "h": 0.45 },
+  "roi_senales": { "x": 0.10, "y": 0.05, "w": 0.80, "h": 0.55 },
+  "rango_hsv_linea": { "h_min": 0, "h_max": 179, "s_min": 0, "s_max": 255, "v_min": 0, "v_max": 110 },
+  "rangos_hsv_rojo": [
+    { "h_min": 0, "h_max": 10, "s_min": 120, "s_max": 255, "v_min": 90, "v_max": 255 },
+    { "h_min": 170, "h_max": 179, "s_min": 120, "s_max": 255, "v_min": 90, "v_max": 255 }
+  ],
+  "rango_hsv_verde": { "h_min": 45, "h_max": 85, "s_min": 100, "s_max": 255, "v_min": 70, "v_max": 255 },
+  "kernel_morfologico_px": 5,
+  "area_minima_rel": 0.001,
+  "n_confirmacion": 3,
+  "k_tolerancia": 2,
+  "x_rearme": 5,
+  "t_parada_s": 3.0,
+  "presupuesto_latencia_frames": 8,
+  "fps_objetivo": 30.0,
+  "vertices_objetivo": 8,
+  "tolerancia_vertices": 1,
+  "aspecto_min": 0.70,
+  "aspecto_max": 1.40
+}

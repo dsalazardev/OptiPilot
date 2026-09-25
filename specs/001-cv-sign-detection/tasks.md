@@ -81,8 +81,8 @@ SIGA confirmado, de forma pura y determinista.
 **Independent Test**: inyectando secuencias de detecciones y tiempos, los 9 escenarios de US2
 (spec §User Story 2) producen las transiciones esperadas y ningún re-disparo.
 
-- [ ] T018 [US2] Implementar `src/vision/maquina_estados.py`: `MaquinaEstados(params, t_inicial)` con `actualizar(presentes, eventos, t_s) -> ResultadoEstado` (estado, decisión y `transiciones_nuevas` con origen, destino, causa y momento — FR-023); reglas: PARE nuevo detiene; T es mínimo y no reanuda por sí solo; cualquier SIGA confirmado durante la detención arma la reanudación (incluido el co-visible al detenerse); PARE nuevo durante la detención no reinicia T ni invalida el SIGA armado; PARE latcheado hasta re-armado; pérdidas ≤ K no afectan (depende de T006, T005)
-- [ ] T019 [P] [US2] Tests de la máquina de estados en `tests/unit/test_maquina_estados.py`: los 9 escenarios de `spec.md` §User Story 2, más invariantes (en DETENIDO_* siempre `NO_AUTORIZADO`; misma secuencia ⇒ mismas transiciones) (depende de T018)
+- [X] T018 [US2] Implementar `src/vision/maquina_estados.py`: `MaquinaEstados(params, t_inicial)` con `actualizar(presentes, eventos, t_s) -> ResultadoEstado` (estado, decisión y `transiciones_nuevas` con origen, destino, causa y momento — FR-023); reglas: PARE nuevo detiene; T es mínimo y no reanuda por sí solo; cualquier SIGA confirmado durante la detención arma la reanudación (incluido el co-visible al detenerse); PARE nuevo durante la detención no reinicia T ni invalida el SIGA armado; PARE latcheado hasta re-armado; pérdidas ≤ K no afectan (depende de T006, T005)
+- [X] T019 [P] [US2] Tests de la máquina de estados en `tests/unit/test_maquina_estados.py`: los 9 escenarios de `spec.md` §User Story 2, más invariantes (en DETENIDO_* siempre `NO_AUTORIZADO`; misma secuencia ⇒ mismas transiciones) (depende de T018)
 
 **Checkpoint**: US2 funcional y verificable sin cámara
 

@@ -23,6 +23,7 @@ __all__ = [
     "EventoSenal",
     "MarcadorVisibilidadPlena",
     "Ocurrencia",
+    "PermisoMovimiento",
     "ResultadoProcesamiento",
     "ResultadoSegmentacion",
     "SenalConfirmada",
@@ -46,11 +47,34 @@ class EstadoRobot(StrEnum):
     DETENIDO_ESPERANDO_SIGA = "DETENIDO_ESPERANDO_SIGA"
 
 
-class DecisionMovimiento(StrEnum):
-    """Decisión emitida a la capa de control."""
+class PermisoMovimiento(StrEnum):
+    """Veredicto binario de la decisión de movimiento (FR-015)."""
 
     AUTORIZADO = "AUTORIZADO"
     NO_AUTORIZADO = "NO_AUTORIZADO"
+
+
+@dataclass(frozen=True)
+class DecisionMovimiento:
+    """Decisión emitida a la capa de control: veredicto + causa (data-model §8).
+
+    ``data-model.md`` §8 exige acompañar el veredicto de una ``causa: str`` que
+    explique por qué se autoriza o no el movimiento (p. ej. ``PARE_CONFIRMADO``,
+    ``T_CUMPLIDO_CON_SIGA``, ``SIGA_CONFIRMADO``, ``INICIO``). Al ser la causa
+    distinta en cada emisión, la decisión es un value object frozen y no un enum
+    simple: el veredicto sigue siendo un ``StrEnum`` (``PermisoMovimiento``) para
+    poder compararse con ``is`` y serializarse sin ambigüedad.
+    """
+
+    veredicto: PermisoMovimiento
+    causa: str
+
+    @property
+    def autorizada(self) -> bool:
+        return self.veredicto is PermisoMovimiento.AUTORIZADO
+
+    def __str__(self) -> str:
+        return f"{self.veredicto}:{self.causa}"
 
 
 class CausaTransicion(StrEnum):

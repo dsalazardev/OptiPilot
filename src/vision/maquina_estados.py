@@ -30,11 +30,28 @@ from src.vision.modelos import (
     DecisionMovimiento,
     EstadoRobot,
     EventoSenal,
+    PermisoMovimiento,
     TipoEvento,
     TransicionEstado,
 )
 
 __all__ = ["MaquinaEstados", "ResultadoEstado"]
+
+CAUSA_INICIO = "INICIO"
+CAUSA_PARE_DETENIDO = "PARE_DETENIDO"
+CAUSA_T_MINIMO_EN_CURSO = "T_MINIMO_EN_CURSO"
+CAUSA_T_CUMPLIDO_SIN_SIGA = "T_CUMPLIDO_SIN_SIGA"
+CAUSA_ESPERANDO_SIGA = "ESPERANDO_SIGA"
+CAUSA_T_CUMPLIDO_CON_SIGA = "T_CUMPLIDO_CON_SIGA"
+CAUSA_SIGA_EN_MARCHA = "SIGA_EN_MARCHA"
+
+
+def _no_autorizado(causa: str) -> DecisionMovimiento:
+    return DecisionMovimiento(veredicto=PermisoMovimiento.NO_AUTORIZADO, causa=causa)
+
+
+def _autorizado(causa: str) -> DecisionMovimiento:
+    return DecisionMovimiento(veredicto=PermisoMovimiento.AUTORIZADO, causa=causa)
 
 
 def _exigir(condicion: bool, mensaje: str) -> None:
@@ -44,11 +61,20 @@ def _exigir(condicion: bool, mensaje: str) -> None:
 
 @dataclass(frozen=True)
 class ResultadoEstado:
-    """Salida de ``MaquinaEstados.actualizar`` (contrato api-pipeline §Fase 4)."""
+    """Salida de ``MaquinaEstados.actualizar`` (contrato api-pipeline §Fase 4).
+
+    ``eventos_nuevos`` recoge los hechos de esta etapa que no son cambios de
+    estado —en particular el rearme del PARE latcheado, tipo
+    ``PARE_REARMADO`` (FR-023)—. El rearme no altera ``estado``, y
+    ``TransicionEstado`` exige por invariante que ``desde != hacia``
+    (``modelos.py``), así que no puede representarse como transición; el
+    contrato de eventos ya prevé el tipo ``PARE_REARMADO`` para este caso.
+    """
 
     estado: EstadoRobot
     decision: DecisionMovimiento
     transiciones_nuevas: list[TransicionEstado] = field(default_factory=list)
+    eventos_nuevos: tuple[EventoSenal, ...] = ()
 
 
 class MaquinaEstados:
@@ -81,7 +107,10 @@ class MaquinaEstados:
         self._params = params
         self._t_inicial = t_inicial
         self._estado: EstadoRobot = EstadoRobot.EN_MARCHA
-        self._decision: DecisionMovimiento = DecisionMovimiento.AUTORIZADO
+        self._decision: DecisionMovimiento = DecisionMovimiento(
+            veredicto=PermisoMovimiento.AUTORIZADO,
+            causa=CAUSA_INICIO,
+        )
         self._t_inicio_parada: float | None = None
         self._siga_armado: bool = False
         self._pare_visible: bool = False
@@ -119,6 +148,7 @@ class MaquinaEstados:
         )
 
         transiciones: list[TransicionEstado] = []
+        eventos_nuevos: list[EventoSenal] = []
         decision: DecisionMovimiento
 
         if pare_confirmado_nuevo:
@@ -137,9 +167,9 @@ class MaquinaEstados:
                 self._t_inicio_parada = t_s
                 if ClaseSenal.SIGA in presentes:
                     self._siga_armado = True
-                decision = DecisionMovimiento.NO_AUTORIZADO
+                decision = _no_autorizado(CAUSA_PARE_DETENIDO)
             else:
-                decision = DecisionMovimiento.AUTORIZADO
+                decision = _autorizado(CAUSA_INICIO)
 
         elif self._estado is EstadoRobot.DETENIDO_MINIMO:
             if ClaseSenal.SIGA in presentes or siga_confirmado_nuevo:
@@ -161,7 +191,7 @@ class MaquinaEstados:
                     self._estado = EstadoRobot.EN_MARCHA
                     self._t_inicio_parada = None
                     self._siga_armado = False
-                    decision = DecisionMovimiento.AUTORIZADO
+                    decision = _autorizado(CAUSA_T_CUMPLIDO_CON_SIGA)
                 else:
                     self._registrar_transicion(
                         transiciones,
@@ -172,9 +202,9 @@ class MaquinaEstados:
                     )
                     self._estado = EstadoRobot.DETENIDO_ESPERANDO_SIGA
                     self._t_inicio_parada = None
-                    decision = DecisionMovimiento.NO_AUTORIZADO
+                    decision = _no_autorizado(CAUSA_T_CUMPLIDO_SIN_SIGA)
             else:
-                decision = DecisionMovimiento.NO_AUTORIZADO
+                decision = _no_autorizado(CAUSA_T_MINIMO_EN_CURSO)
 
         else:
             if siga_confirmado_nuevo:
@@ -188,12 +218,12 @@ class MaquinaEstados:
                 self._estado = EstadoRobot.EN_MARCHA
                 self._t_inicio_parada = None
                 self._siga_armado = False
-                decision = DecisionMovimiento.AUTORIZADO
+                decision = _autorizado(CausaTransicion.SIGA_CONFIRMADO.value)
             else:
-                decision = DecisionMovimiento.NO_AUTORIZADO
+                decision = _no_autorizado(CAUSA_ESPERANDO_SIGA)
 
         if self._fotogramas_sin_pare >= self._params.x_rearme and self._pare_visible:
-            self._rearmar_pare(transiciones, t_s)
+            eventos_nuevos.extend(self._rearmar_pare(t_s))
 
         self._decision = decision
         self._fotograma += 1
@@ -202,6 +232,7 @@ class MaquinaEstados:
             estado=self._estado,
             decision=decision,
             transiciones_nuevas=transiciones,
+            eventos_nuevos=tuple(eventos_nuevos),
         )
 
     @staticmethod
@@ -232,13 +263,21 @@ class MaquinaEstados:
             )
         )
 
-    def _rearmar_pare(self, transiciones: list[TransicionEstado], t_s: float) -> None:
+    def _rearmar_pare(self, t_s: float) -> list[EventoSenal]:
+        """Libera el latch del PARE y deja constancia del rearme (FR-023).
+
+        No se serializa como ``TransicionEstado`` porque el rearme no cambia el
+        estado, ni como evento ``TRANSICION`` porque ``EventoSenal`` reserva
+        ``origen``/``destino``/``causa`` a ese tipo. El tipo ``PARE_REARMADO`` y
+        la ``clase`` son la evidencia suficiente en ``eventos.jsonl``.
+        """
         self._pare_visible = False
         self._fotogramas_sin_pare = 0
-        self._registrar_transicion(
-            transiciones,
-            self._estado,
-            self._estado,
-            CausaTransicion.REARME,
-            t_s,
-        )
+        return [
+            EventoSenal(
+                tipo=TipoEvento.PARE_REARMADO,
+                fotograma_idx=self._fotograma,
+                t_s=t_s,
+                clase=ClaseSenal.PARE,
+            )
+        ]

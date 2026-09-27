@@ -1,12 +1,16 @@
 """Tests unitarios de la máquina de estados PARE/SIGA (T019).
 
 Validan los 9 escenarios de aceptación de US2 inyectando secuencias
-deterministas de señales confirmadas, eventos y tiempos inyectados: un PARE
-detiene e inicia T, T nunca reanuda por sí solo, el SIGA confirmado durante la
-detención queda armado y reanuda al cumplirse T, un PARE nuevo no reinicia T ni
-invalida el SIGA armado, las pérdidas momentáneas ≤ K no afectan el estado ni el
-cronómetro, y el rearme del PARE ocurre tras X fotogramas sin verlo. Se comprueba
-además el determinismo y el invariante DETENIDO_* ⇒ NO_AUTORIZADO
+deterministas de señales confirmadas, eventos y tiempos: un PARE detiene e
+inicia T, T nunca reanuda por sí solo, el SIGA confirmado durante la detención
+queda armado y reanuda al cumplirse T, un PARE nuevo no reinicia T ni invalida
+el SIGA armado, las pérdidas momentáneas ≤ K no afectan el estado ni el
+cronómetro, y el rearme del PARE ocurre tras X fotogramas sin verlo.
+
+Cada escenario comprueba explícitamente el estado, el veredicto, la ``causa`` de
+la decisión (``data-model.md`` §8), la lista completa de ``transiciones_nuevas``
+con origen/destino/causa/momento (FR-023) y la property ``decision``. Se
+comprueban además el determinismo y el invariante DETENIDO_* ⇒ NO_AUTORIZADO
 (FR-015..FR-025).
 """
 
@@ -21,6 +25,7 @@ from src.vision.modelos import (
     DecisionMovimiento,
     EstadoRobot,
     EventoSenal,
+    PermisoMovimiento,
     TipoEvento,
 )
 
@@ -46,15 +51,43 @@ def _transiciones(resultado: ResultadoEstado) -> list[tuple]:
     return [(t.desde, t.hacia, t.causa) for t in resultado.transiciones_nuevas]
 
 
+def _completo(
+    resultado: ResultadoEstado,
+    maquina: MaquinaEstados,
+    *,
+    estado: EstadoRobot,
+    veredicto: PermisoMovimiento,
+    causa: str,
+    transiciones: list[tuple],
+) -> None:
+    """Comprueba estado, decisión, causa, transiciones y la property `decision`."""
+    assert resultado.estado is estado
+    assert resultado.decision.veredicto is veredicto
+    assert resultado.decision.causa == causa
+    assert resultado.decision.autorizada is (veredicto is PermisoMovimiento.AUTORIZADO)
+    assert _transiciones(resultado) == transiciones
+    assert isinstance(resultado.eventos_nuevos, tuple)
+    assert maquina.estado is estado
+    assert maquina.decision == resultado.decision
+    assert maquina.decision.causa == causa
+    for transicion in resultado.transiciones_nuevas:
+        assert transicion.t_s >= 0.0
+
+
 def test_estado_inicial_es_marcha_autORIZada(parametros_por_defecto) -> None:
     """Sin señales ni eventos el robot sigue y la decisión es AUTORIZADO (FR-015)."""
     maquina = _maquina(parametros_por_defecto)
 
     resultado = maquina.actualizar(frozenset(), [], t_s=0.0)
 
-    assert resultado.estado is EstadoRobot.EN_MARCHA
-    assert resultado.decision is DecisionMovimiento.AUTORIZADO
-    assert resultado.transiciones_nuevas == []
+    _completo(
+        resultado,
+        maquina,
+        estado=EstadoRobot.EN_MARCHA,
+        veredicto=PermisoMovimiento.AUTORIZADO,
+        causa="INICIO",
+        transiciones=[],
+    )
 
 
 def test_pare_detiene_e_inicia_el_cronometro_t(parametros_por_defecto) -> None:
@@ -65,11 +98,21 @@ def test_pare_detiene_e_inicia_el_cronometro_t(parametros_por_defecto) -> None:
         frozenset({ClaseSenal.PARE}), [_pare(idx=0, t_s=0.0)], t_s=0.0
     )
 
-    assert resultado.estado is EstadoRobot.DETENIDO_MINIMO
-    assert resultado.decision is DecisionMovimiento.NO_AUTORIZADO
-    assert _transiciones(resultado) == [
-        (EstadoRobot.EN_MARCHA, EstadoRobot.DETENIDO_MINIMO, CausaTransicion.PARE_CONFIRMADO)
-    ]
+    _completo(
+        resultado,
+        maquina,
+        estado=EstadoRobot.DETENIDO_MINIMO,
+        veredicto=PermisoMovimiento.NO_AUTORIZADO,
+        causa="PARE_DETENIDO",
+        transiciones=[
+            (
+                EstadoRobot.EN_MARCHA,
+                EstadoRobot.DETENIDO_MINIMO,
+                CausaTransicion.PARE_CONFIRMADO,
+            )
+        ],
+    )
+    assert resultado.transiciones_nuevas[0].t_s == 0.0
 
 
 def test_pare_persistente_no_reinicia_t_ni_duplica_detencion(parametros_por_defecto) -> None:
@@ -78,15 +121,28 @@ def test_pare_persistente_no_reinicia_t_ni_duplica_detencion(parametros_por_defe
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
 
     intermedio = maquina.actualizar(frozenset({ClaseSenal.PARE}), [], t_s=1.0)
+    _completo(
+        intermedio,
+        maquina,
+        estado=EstadoRobot.DETENIDO_MINIMO,
+        veredicto=PermisoMovimiento.NO_AUTORIZADO,
+        causa="T_MINIMO_EN_CURSO",
+        transiciones=[],
+    )
+
     reanudacion = maquina.actualizar(
         frozenset({ClaseSenal.PARE, ClaseSenal.SIGA}), [_siga(2, 3.0)], t_s=3.0
     )
-
-    assert intermedio.estado is EstadoRobot.DETENIDO_MINIMO
-    assert intermedio.decision is DecisionMovimiento.NO_AUTORIZADO
-    assert intermedio.transiciones_nuevas == []
-    assert reanudacion.estado is EstadoRobot.EN_MARCHA
-    assert reanudacion.decision is DecisionMovimiento.AUTORIZADO
+    _completo(
+        reanudacion,
+        maquina,
+        estado=EstadoRobot.EN_MARCHA,
+        veredicto=PermisoMovimiento.AUTORIZADO,
+        causa="T_CUMPLIDO_CON_SIGA",
+        transiciones=[
+            (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
+        ],
+    )
 
 
 def test_siga_tras_cumplir_t_reanuda_y_registra_transicion(parametros_por_defecto) -> None:
@@ -98,27 +154,47 @@ def test_siga_tras_cumplir_t_reanuda_y_registra_transicion(parametros_por_defect
         frozenset({ClaseSenal.SIGA}), [_siga(idx=1, t_s=3.0)], t_s=3.0
     )
 
-    assert resultado.estado is EstadoRobot.EN_MARCHA
-    assert resultado.decision is DecisionMovimiento.AUTORIZADO
-    assert _transiciones(resultado) == [
-        (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
-    ]
+    _completo(
+        resultado,
+        maquina,
+        estado=EstadoRobot.EN_MARCHA,
+        veredicto=PermisoMovimiento.AUTORIZADO,
+        causa="T_CUMPLIDO_CON_SIGA",
+        transiciones=[
+            (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
+        ],
+    )
+    assert resultado.transiciones_nuevas[0].t_s == 3.0
 
 
 def test_siga_confirmado_antes_de_t_queda_armado(parametros_por_defecto) -> None:
     """Escenario 4: SIGA antes de T reanuda al cumplirse T aunque salga de vista."""
     maquina = _maquina(parametros_por_defecto)
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
+
     armado = maquina.actualizar(
         frozenset({ClaseSenal.SIGA}), [_siga(idx=1, t_s=1.0)], t_s=1.0
     )
+    _completo(
+        armado,
+        maquina,
+        estado=EstadoRobot.DETENIDO_MINIMO,
+        veredicto=PermisoMovimiento.NO_AUTORIZADO,
+        causa="T_MINIMO_EN_CURSO",
+        transiciones=[],
+    )
 
     resultado = maquina.actualizar(frozenset(), [], t_s=3.0)
-
-    assert armado.estado is EstadoRobot.DETENIDO_MINIMO
-    assert armado.decision is DecisionMovimiento.NO_AUTORIZADO
-    assert resultado.estado is EstadoRobot.EN_MARCHA
-    assert resultado.decision is DecisionMovimiento.AUTORIZADO
+    _completo(
+        resultado,
+        maquina,
+        estado=EstadoRobot.EN_MARCHA,
+        veredicto=PermisoMovimiento.AUTORIZADO,
+        causa="T_CUMPLIDO_CON_SIGA",
+        transiciones=[
+            (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
+        ],
+    )
 
 
 def test_siga_en_marcha_no_detiene(parametros_por_defecto) -> None:
@@ -129,8 +205,15 @@ def test_siga_en_marcha_no_detiene(parametros_por_defecto) -> None:
         frozenset({ClaseSenal.SIGA}), [_siga(idx=0, t_s=0.0)], t_s=0.0
     )
 
-    assert resultado.estado is EstadoRobot.EN_MARCHA
-    assert resultado.decision is DecisionMovimiento.AUTORIZADO
+    _completo(
+        resultado,
+        maquina,
+        estado=EstadoRobot.EN_MARCHA,
+        veredicto=PermisoMovimiento.AUTORIZADO,
+        causa="INICIO",
+        transiciones=[],
+    )
+    assert resultado.decision.autorizada
 
 
 def test_t_cumplido_sin_siga_permanece_esperando(parametros_por_defecto) -> None:
@@ -140,8 +223,31 @@ def test_t_cumplido_sin_siga_permanece_esperando(parametros_por_defecto) -> None
 
     resultado = maquina.actualizar(frozenset({ClaseSenal.PARE}), [], t_s=5.0)
 
-    assert resultado.decision is DecisionMovimiento.NO_AUTORIZADO
-    assert resultado.estado is EstadoRobot.DETENIDO_ESPERANDO_SIGA
+    _completo(
+        resultado,
+        maquina,
+        estado=EstadoRobot.DETENIDO_ESPERANDO_SIGA,
+        veredicto=PermisoMovimiento.NO_AUTORIZADO,
+        causa="T_CUMPLIDO_SIN_SIGA",
+        transiciones=[
+            (
+                EstadoRobot.DETENIDO_MINIMO,
+                EstadoRobot.DETENIDO_ESPERANDO_SIGA,
+                CausaTransicion.T_CUMPLIDO,
+            )
+        ],
+    )
+    assert not resultado.decision.autorizada
+
+    posterior = maquina.actualizar(frozenset({ClaseSenal.PARE}), [], t_s=9.0)
+    _completo(
+        posterior,
+        maquina,
+        estado=EstadoRobot.DETENIDO_ESPERANDO_SIGA,
+        veredicto=PermisoMovimiento.NO_AUTORIZADO,
+        causa="ESPERANDO_SIGA",
+        transiciones=[],
+    )
 
 
 def test_perdida_momentanea_no_altera_estado_ni_cronometro(parametros_por_defecto) -> None:
@@ -150,14 +256,28 @@ def test_perdida_momentanea_no_altera_estado_ni_cronometro(parametros_por_defect
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
 
     durante_hueco = maquina.actualizar(frozenset(), [], t_s=1.0)
+    _completo(
+        durante_hueco,
+        maquina,
+        estado=EstadoRobot.DETENIDO_MINIMO,
+        veredicto=PermisoMovimiento.NO_AUTORIZADO,
+        causa="T_MINIMO_EN_CURSO",
+        transiciones=[],
+    )
+
     reanudacion = maquina.actualizar(
         frozenset({ClaseSenal.SIGA}), [_siga(idx=2, t_s=3.0)], t_s=3.0
     )
-
-    assert durante_hueco.estado is EstadoRobot.DETENIDO_MINIMO
-    assert durante_hueco.decision is DecisionMovimiento.NO_AUTORIZADO
-    assert reanudacion.estado is EstadoRobot.EN_MARCHA
-    assert reanudacion.decision is DecisionMovimiento.AUTORIZADO
+    _completo(
+        reanudacion,
+        maquina,
+        estado=EstadoRobot.EN_MARCHA,
+        veredicto=PermisoMovimiento.AUTORIZADO,
+        causa="T_CUMPLIDO_CON_SIGA",
+        transiciones=[
+            (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
+        ],
+    )
 
 
 def test_pare_y_siga_co_visibles_arman_siga_sin_exigir_otro(parametros_por_defecto) -> None:
@@ -169,12 +289,32 @@ def test_pare_y_siga_co_visibles_arman_siga_sin_exigir_otro(parametros_por_defec
         [_pare(0, 0.0), _siga(idx=0, t_s=0.0)],
         t_s=0.0,
     )
-    reanudacion = maquina.actualizar(frozenset(), [], t_s=3.0)
+    _completo(
+        detenido,
+        maquina,
+        estado=EstadoRobot.DETENIDO_MINIMO,
+        veredicto=PermisoMovimiento.NO_AUTORIZADO,
+        causa="PARE_DETENIDO",
+        transiciones=[
+            (
+                EstadoRobot.EN_MARCHA,
+                EstadoRobot.DETENIDO_MINIMO,
+                CausaTransicion.PARE_CONFIRMADO,
+            )
+        ],
+    )
 
-    assert detenido.estado is EstadoRobot.DETENIDO_MINIMO
-    assert detenido.decision is DecisionMovimiento.NO_AUTORIZADO
-    assert reanudacion.estado is EstadoRobot.EN_MARCHA
-    assert reanudacion.decision is DecisionMovimiento.AUTORIZADO
+    reanudacion = maquina.actualizar(frozenset(), [], t_s=3.0)
+    _completo(
+        reanudacion,
+        maquina,
+        estado=EstadoRobot.EN_MARCHA,
+        veredicto=PermisoMovimiento.AUTORIZADO,
+        causa="T_CUMPLIDO_CON_SIGA",
+        transiciones=[
+            (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
+        ],
+    )
 
 
 def test_pare_nuevo_durante_detencion_no_altera_t_ni_siga_armado(
@@ -188,12 +328,67 @@ def test_pare_nuevo_durante_detencion_no_altera_t_ni_siga_armado(
     con_pare_nuevo = maquina.actualizar(
         frozenset({ClaseSenal.PARE}), [_pare(idx=2, t_s=2.0)], t_s=2.0
     )
-    reanudacion = maquina.actualizar(frozenset(), [], t_s=3.0)
+    _completo(
+        con_pare_nuevo,
+        maquina,
+        estado=EstadoRobot.DETENIDO_MINIMO,
+        veredicto=PermisoMovimiento.NO_AUTORIZADO,
+        causa="T_MINIMO_EN_CURSO",
+        transiciones=[],
+    )
 
-    assert con_pare_nuevo.estado is EstadoRobot.DETENIDO_MINIMO
-    assert con_pare_nuevo.decision is DecisionMovimiento.NO_AUTORIZADO
-    assert reanudacion.estado is EstadoRobot.EN_MARCHA
-    assert reanudacion.decision is DecisionMovimiento.AUTORIZADO
+    reanudacion = maquina.actualizar(frozenset(), [], t_s=3.0)
+    _completo(
+        reanudacion,
+        maquina,
+        estado=EstadoRobot.EN_MARCHA,
+        veredicto=PermisoMovimiento.AUTORIZADO,
+        causa="T_CUMPLIDO_CON_SIGA",
+        transiciones=[
+            (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
+        ],
+    )
+
+
+def test_rearme_emitido_tras_x_fotogramas_sin_pare(parametros_por_defecto) -> None:
+    """Tras x_rearme fotogramas sin PARE visible se emite PARE_REARMADO (FR-023).
+
+    El rearme no cambia ``estado``, y ``TransicionEstado`` exige por invariante
+    ``desde != hacia``; por eso se registra como evento y no como transición.
+    """
+    maquina = _maquina(parametros_por_defecto)
+    maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
+    maquina.actualizar(frozenset({ClaseSenal.SIGA}), [_siga(idx=1, t_s=3.0)], t_s=3.0)
+
+    eventos: list[EventoSenal] = []
+    for paso in range(parametros_por_defecto.x_rearme + 3):
+        resultado = maquina.actualizar(frozenset(), [], t_s=4.0 + paso)
+        eventos.extend(resultado.eventos_nuevos)
+
+    assert [e.tipo for e in eventos] == [TipoEvento.PARE_REARMADO]
+    assert eventos[0].clase is ClaseSenal.PARE
+    assert eventos[0].causa is None
+    assert eventos[0].t_s == 4.0 + (parametros_por_defecto.x_rearme - 2)
+
+    posterior = maquina.actualizar(frozenset(), [], t_s=20.0)
+    assert posterior.estado is EstadoRobot.EN_MARCHA
+    assert posterior.eventos_nuevos == ()
+    assert _transiciones(posterior) == []
+
+
+def test_rearme_no_se_repite_al_siguiente_fotograma(parametros_por_defecto) -> None:
+    """El latch queda limpio tras el rearme: un solo PARE_REARMADO por ciclo."""
+    maquina = _maquina(parametros_por_defecto)
+    maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
+    maquina.actualizar(frozenset({ClaseSenal.SIGA}), [_siga(idx=1, t_s=3.0)], t_s=3.0)
+
+    eventos = [
+        evento
+        for paso in range(parametros_por_defecto.x_rearme + 3)
+        for evento in maquina.actualizar(frozenset(), [], t_s=4.0 + paso).eventos_nuevos
+    ]
+
+    assert [e.tipo for e in eventos] == [TipoEvento.PARE_REARMADO]
 
 
 def test_invariante_detenido_implica_no_autorizado(parametros_por_defecto) -> None:
@@ -204,7 +399,28 @@ def test_invariante_detenido_implica_no_autorizado(parametros_por_defecto) -> No
     for idx, t_s in enumerate((1.0, 2.0, 3.0, 4.0), start=1):
         resultado = maquina.actualizar(frozenset({ClaseSenal.PARE}), [], t_s=t_s)
         if resultado.estado is not EstadoRobot.EN_MARCHA:
-            assert resultado.decision is DecisionMovimiento.NO_AUTORIZADO
+            assert resultado.decision.veredicto is PermisoMovimiento.NO_AUTORIZADO
+            assert not resultado.decision.autorizada
+            assert maquina.decision.veredicto is PermisoMovimiento.NO_AUTORIZADO
+            assert resultado.decision.causa != ""
+
+
+def test_causas_de_decision_son_no_vacias(parametros_por_defecto) -> None:
+    """Toda decisión expone una causa informativa (data-model §8)."""
+    maquina = _maquina(parametros_por_defecto)
+    secuencia = [
+        (frozenset(), [], 0.0),
+        (frozenset({ClaseSenal.PARE}), [_pare(1, 1.0)], 1.0),
+        (frozenset({ClaseSenal.PARE}), [], 2.0),
+        (frozenset({ClaseSenal.PARE}), [], 5.0),
+        (frozenset({ClaseSenal.SIGA}), [_siga(idx=5, t_s=6.0)], 6.0),
+    ]
+
+    for presentes, eventos, t_s in secuencia:
+        decision = maquina.actualizar(presentes, eventos, t_s).decision
+        assert isinstance(decision, DecisionMovimiento)
+        assert decision.causa
+        assert str(decision) == f"{decision.veredicto}:{decision.causa}"
 
 
 def test_misma_secuencia_produce_mismo_resultado(parametros_por_defecto) -> None:

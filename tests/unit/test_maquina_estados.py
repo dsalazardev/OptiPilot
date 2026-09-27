@@ -66,7 +66,6 @@ def _completo(
     assert resultado.decision.causa == causa
     assert resultado.decision.autorizada is (veredicto is PermisoMovimiento.AUTORIZADO)
     assert _transiciones(resultado) == transiciones
-    assert isinstance(resultado.eventos_nuevos, tuple)
     assert maquina.estado is estado
     assert maquina.decision == resultado.decision
     assert maquina.decision.causa == causa
@@ -350,45 +349,43 @@ def test_pare_nuevo_durante_detencion_no_altera_t_ni_siga_armado(
     )
 
 
-def test_rearme_emitido_tras_x_fotogramas_sin_pare(parametros_por_defecto) -> None:
-    """Tras x_rearme fotogramas sin PARE visible se emite PARE_REARMADO (FR-023).
+def test_fsm_no_emite_rearme_ese_latch_es_de_la_deteccion(parametros_por_defecto) -> None:
+    """La FSM no rearma el PARE: el latch es de ``deteccion.py`` (propiedad única).
 
-    El rearme no cambia ``estado``, y ``TransicionEstado`` exige por invariante
-    ``desde != hacia``; por eso se registra como evento y no como transición.
+    Si la FSM llevara su propio contador, mediría "fotogramas sin confirmación"
+    en vez de "fotogramas sin ver la señal" y emitiría un ``PARE_REARMADO``
+    duplicado en ``eventos.jsonl`` con el octágono todavía a la vista. El
+    comportamiento correcto del rearme se verifica en
+    ``test_deteccion_confirmacion.py::test_rearmado_a_los_cinco_fotogramas_y_nueva_ocurrencia``.
     """
     maquina = _maquina(parametros_por_defecto)
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
-    maquina.actualizar(frozenset({ClaseSenal.SIGA}), [_siga(idx=1, t_s=3.0)], t_s=3.0)
 
-    eventos: list[EventoSenal] = []
-    for paso in range(parametros_por_defecto.x_rearme + 3):
-        resultado = maquina.actualizar(frozenset(), [], t_s=4.0 + paso)
-        eventos.extend(resultado.eventos_nuevos)
-
-    assert [e.tipo for e in eventos] == [TipoEvento.PARE_REARMADO]
-    assert eventos[0].clase is ClaseSenal.PARE
-    assert eventos[0].causa is None
-    assert eventos[0].t_s == 4.0 + (parametros_por_defecto.x_rearme - 2)
-
-    posterior = maquina.actualizar(frozenset(), [], t_s=20.0)
-    assert posterior.estado is EstadoRobot.EN_MARCHA
-    assert posterior.eventos_nuevos == ()
-    assert _transiciones(posterior) == []
+    # Pasos cortos: el ciclo completo no debe cruzar el cronómetro T (3.0 s), que
+    # provocaría la transición legítima DETENIDO_MINIMO -> DETENIDO_ESPERANDO_SIGA.
+    for paso in range(parametros_por_defecto.x_rearme + 5):
+        resultado = maquina.actualizar(frozenset(), [], t_s=0.1 * (paso + 1))
+        assert not hasattr(resultado, "eventos_nuevos")
+        assert resultado.estado is EstadoRobot.DETENIDO_MINIMO
+        assert _transiciones(resultado) == []
 
 
-def test_rearme_no_se_repite_al_siguiente_fotograma(parametros_por_defecto) -> None:
-    """El latch queda limpio tras el rearme: un solo PARE_REARMADO por ciclo."""
+def test_pare_rearmado_por_deteccion_no_altera_la_fsm(parametros_por_defecto) -> None:
+    """Un ``PARE_REARMADO`` que llega como evento no reinicia T ni cambia el estado."""
     maquina = _maquina(parametros_por_defecto)
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
-    maquina.actualizar(frozenset({ClaseSenal.SIGA}), [_siga(idx=1, t_s=3.0)], t_s=3.0)
 
-    eventos = [
-        evento
-        for paso in range(parametros_por_defecto.x_rearme + 3)
-        for evento in maquina.actualizar(frozenset(), [], t_s=4.0 + paso).eventos_nuevos
-    ]
+    rearmado = EventoSenal(
+        tipo=TipoEvento.PARE_REARMADO,
+        fotograma_idx=8,
+        t_s=1.0,
+        clase=ClaseSenal.PARE,
+    )
+    resultado = maquina.actualizar(frozenset(), [rearmado], t_s=1.0)
 
-    assert [e.tipo for e in eventos] == [TipoEvento.PARE_REARMADO]
+    assert resultado.estado is EstadoRobot.DETENIDO_MINIMO
+    assert resultado.decision.veredicto is PermisoMovimiento.NO_AUTORIZADO
+    assert _transiciones(resultado) == []
 
 
 def test_invariante_detenido_implica_no_autorizado(parametros_por_defecto) -> None:

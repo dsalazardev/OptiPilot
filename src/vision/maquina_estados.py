@@ -63,18 +63,16 @@ def _exigir(condicion: bool, mensaje: str) -> None:
 class ResultadoEstado:
     """Salida de ``MaquinaEstados.actualizar`` (contrato api-pipeline §Fase 4).
 
-    ``eventos_nuevos`` recoge los hechos de esta etapa que no son cambios de
-    estado —en particular el rearme del PARE latcheado, tipo
-    ``PARE_REARMADO`` (FR-023)—. El rearme no altera ``estado``, y
-    ``TransicionEstado`` exige por invariante que ``desde != hacia``
-    (``modelos.py``), así que no puede representarse como transición; el
-    contrato de eventos ya prevé el tipo ``PARE_REARMADO`` para este caso.
+    Lleva exactamente los tres campos que documenta el contrato
+    (``estado``, ``decision``, ``transiciones_nuevas``). La FSM no emite eventos
+    propios: el rearme de la señal PARE es responsabilidad de la etapa de
+    detección, que es la única que observa la visibilidad real, y llega ya
+    filtrado por el pipeline en ``resultado.eventos``.
     """
 
     estado: EstadoRobot
     decision: DecisionMovimiento
     transiciones_nuevas: list[TransicionEstado] = field(default_factory=list)
-    eventos_nuevos: tuple[EventoSenal, ...] = ()
 
 
 class MaquinaEstados:
@@ -95,14 +93,19 @@ class MaquinaEstados:
       y reanuda solo ante un SIGA confirmado (FR-017).
     - Una pérdida momentánea ≤ K no afecta el estado ni el cronómetro, porque la
       máquina solo reacciona a confirmaciones de flanco de subida (FR-018/FR-022).
-    - Tras ``x_rearme`` fotogramas sin PARE visible, la señal PARE se **rearma**
-      (FR-023) y queda registrada la transición con causa ``REARME``.
+
+    El *latch* del PARE (cuenta de ``x_rearme`` fotogramas sin ver la señal y
+    emisión de ``PARE_REARMADO``, FR-023) es de una sola propiedad: lo lleva la
+    etapa de detección (``deteccion.py``), la única que observa la visibilidad
+    real. La FSM no lo duplica porque solo recibe confirmaciones de flanco de
+    subida: con su propio contador mediría "fotogramas sin confirmación" en
+    vez de "fotogramas sin señal", se rearmaría con el octágono todavía a la
+    vista y además duplicaría el evento ``PARE_REARMADO`` en ``eventos.jsonl``.
     """
 
     def __init__(self, params: ParametrosConfiguracion, t_inicial: float) -> None:
         _exigir(params.t_parada_s >= 0, "t_parada_s debe ser >= 0")
         _exigir(params.k_tolerancia >= 0, "k_tolerancia debe ser >= 0")
-        _exigir(params.x_rearme >= 0, "x_rearme debe ser >= 0")
         _exigir(t_inicial >= 0, "t_inicial debe ser >= 0")
         self._params = params
         self._t_inicial = t_inicial
@@ -113,8 +116,6 @@ class MaquinaEstados:
         )
         self._t_inicio_parada: float | None = None
         self._siga_armado: bool = False
-        self._pare_visible: bool = False
-        self._fotogramas_sin_pare: int = 0
         self._fotograma: int = 0
 
     @property
@@ -143,16 +144,9 @@ class MaquinaEstados:
 
         pare_confirmado_nuevo = self._confirmado(eventos, ClaseSenal.PARE)
         siga_confirmado_nuevo = self._confirmado(eventos, ClaseSenal.SIGA)
-        self._fotogramas_sin_pare = (
-            0 if ClaseSenal.PARE in presentes else self._fotogramas_sin_pare + 1
-        )
 
         transiciones: list[TransicionEstado] = []
-        eventos_nuevos: list[EventoSenal] = []
         decision: DecisionMovimiento
-
-        if pare_confirmado_nuevo:
-            self._pare_visible = True
 
         if self._estado is EstadoRobot.EN_MARCHA:
             if pare_confirmado_nuevo:
@@ -222,9 +216,6 @@ class MaquinaEstados:
             else:
                 decision = _no_autorizado(CAUSA_ESPERANDO_SIGA)
 
-        if self._fotogramas_sin_pare >= self._params.x_rearme and self._pare_visible:
-            eventos_nuevos.extend(self._rearmar_pare(t_s))
-
         self._decision = decision
         self._fotograma += 1
 
@@ -232,7 +223,6 @@ class MaquinaEstados:
             estado=self._estado,
             decision=decision,
             transiciones_nuevas=transiciones,
-            eventos_nuevos=tuple(eventos_nuevos),
         )
 
     @staticmethod
@@ -263,21 +253,3 @@ class MaquinaEstados:
             )
         )
 
-    def _rearmar_pare(self, t_s: float) -> list[EventoSenal]:
-        """Libera el latch del PARE y deja constancia del rearme (FR-023).
-
-        No se serializa como ``TransicionEstado`` porque el rearme no cambia el
-        estado, ni como evento ``TRANSICION`` porque ``EventoSenal`` reserva
-        ``origen``/``destino``/``causa`` a ese tipo. El tipo ``PARE_REARMADO`` y
-        la ``clase`` son la evidencia suficiente en ``eventos.jsonl``.
-        """
-        self._pare_visible = False
-        self._fotogramas_sin_pare = 0
-        return [
-            EventoSenal(
-                tipo=TipoEvento.PARE_REARMADO,
-                fotograma_idx=self._fotograma,
-                t_s=t_s,
-                clase=ClaseSenal.PARE,
-            )
-        ]

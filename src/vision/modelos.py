@@ -23,6 +23,7 @@ __all__ = [
     "EventoSenal",
     "MarcadorVisibilidadPlena",
     "Ocurrencia",
+    "Parada",
     "PermisoMovimiento",
     "ResultadoProcesamiento",
     "ResultadoSegmentacion",
@@ -285,6 +286,38 @@ class MarcadorVisibilidadPlena:
     def __post_init__(self) -> None:
         _exigir(self.fotograma_idx >= 0, "fotograma_idx debe ser >= 0")
         _exigir(self.t_s >= 0, "t_s debe ser >= 0")
+
+
+@dataclass(frozen=True)
+class Parada:
+    """Detención por PARE y su reanudación (data-model §13, SC-008/FR-025).
+
+    ``retardo_s`` es el tiempo adicional que el robot esperaba un SIGA una vez
+    cumplidos los ``t_configurado_s`` minutos (contrato de eventos/métricas,
+    §``paradas[].retardo_s``). Se calcula con :meth:`crear` para no dejar la
+    resta a mano del consumidor.
+    """
+
+    inicio_t: float
+    t_configurado_s: float
+    fin_t: float
+    retardo_s: float
+
+    def __post_init__(self) -> None:
+        _exigir(self.inicio_t >= 0, "inicio_t debe ser >= 0")
+        _exigir(self.t_configurado_s >= 0, "t_configurado_s debe ser >= 0")
+        _exigir(self.fin_t >= self.inicio_t, "fin_t no puede ser anterior a inicio_t")
+        _exigir(self.retardo_s >= 0, "retardo_s debe ser >= 0")
+
+    @classmethod
+    def crear(cls, inicio_t: float, t_configurado_s: float, fin_t: float) -> "Parada":
+        """Construye la parada derivando el retardo respecto al fin de T."""
+        return cls(
+            inicio_t=inicio_t,
+            t_configurado_s=t_configurado_s,
+            fin_t=fin_t,
+            retardo_s=max(0.0, fin_t - (inicio_t + t_configurado_s)),
+        )
 
 
 @dataclass

@@ -4,6 +4,13 @@ Define los enums y dataclasses que intercambian las etapas: segmentación,
 candidatos, detección confirmada, ocurrencias, eventos, máquina de estados y
 métricas. Sin lógica de visión ni E/S: solo estructura y validaciones del
 modelo (Constitución §II, §IV).
+
+El bloque de control de trayectoria (Objetivos 3 y 4 del Reto 1) se añadió en
+``specs/002`` y vive en el mismo módulo para que el compositor pueda consumir
+``DecisionMovimiento`` junto a ``DecisionCompuesta`` sin introducir un ciclo de
+importación entre ``vision`` y ``transporte`` (§II: el pipeline justifica la
+estructura). Ninguna de las entidades preexistentes se modificó: el contrato
+de 001 del que dependen sus 167 pruebas queda intacto (FR-026).
 """
 
 from __future__ import annotations
@@ -15,16 +22,23 @@ import numpy as np
 
 __all__ = [
     "CandidatoSenal",
+    "CausaComando",
     "CausaTransicion",
     "ClaseSenal",
+    "ComandoMovimiento",
+    "DecisionCompuesta",
+    "DecisionControl",
     "DecisionMovimiento",
     "EstadoOcurrencia",
     "EstadoRobot",
     "EventoSenal",
+    "Lado",
+    "LadoConocido",
     "MarcadorVisibilidadPlena",
     "Ocurrencia",
     "Parada",
     "PermisoMovimiento",
+    "PosicionLinea",
     "ResultadoProcesamiento",
     "ResultadoSegmentacion",
     "SenalConfirmada",
@@ -333,3 +347,148 @@ class ResultadoProcesamiento:
 
     def __post_init__(self) -> None:
         _exigir(self.latencia_ms >= 0, "latencia_ms debe ser >= 0")
+
+
+# ---------------------------------------------------------------------------
+# Control de trayectoria (specs/002 — Objetivos 3 y 4 del Reto 1)
+# ---------------------------------------------------------------------------
+
+
+class Lado(StrEnum):
+    """Lado en que se encontró la línea respecto al objetivo (data-model §4).
+
+    Se evita ``int`` o ``bool`` porque el dominio es explícito y el valor tiene
+    que poder imprimirse tal cual en la evidencia visual del póster.
+    """
+
+    IZQUIERDA = "IZQUIERDA"
+    DERECHA = "DERECHA"
+
+
+class ComandoMovimiento(StrEnum):
+    """Vocabulario de la API de control: los cuatro valores fijados (data-model §5).
+
+    ``IZQUIERDA`` y ``DERECHA`` significan **«la línea está de ese lado»**, no
+    «gira a la izquierda/derecha»: la equivalencia con el giro físico depende
+    del montaje de cámara y motores, y es un riesgo abierto declarado en la
+    spec, no un detalle de implementación.
+
+    ``DETENER`` es el valor por defecto ante cualquier condición no reconocida
+    (FR-025): el control nunca devuelve ``None`` ni propaga excepción.
+    """
+
+    AVANZAR = "AVANZAR"
+    IZQUIERDA = "IZQUIERDA"
+    DERECHA = "DERECHA"
+    DETENER = "DETENER"
+
+
+class CausaComando(StrEnum):
+    """Por qué se emitió el comando final (data-model §6, FR-027).
+
+    Existe para que la precedencia sea demostrable en la defensa oral: cada
+    comando emitido lleva su motivo, y ``VETO_FSM`` prueba que un PARE ganó
+    siempre (SC-007).
+    """
+
+    SEGUIMIENTO = "SEGUIMIENTO"
+    CORRECCION_DERECHA = "CORRECCION_DERECHA"
+    CORRECCION_IZQUIERDA = "CORRECCION_IZQUIERDA"
+    RECUPERACION = "RECUPERACION"
+    PERDIDA_SIN_MEMORIA = "PERDIDA_SIN_MEMORIA"
+    GRACIA_AGOTADA = "GRACIA_AGOTADA"
+    VETO_FSM = "VETO_FSM"
+    FALLO_SEGURO = "FALLO_SEGURO"
+
+
+@dataclass(frozen=True)
+class PosicionLinea:
+    """Posición lateral estimada de la línea en un fotograma (data-model §2).
+
+    Invariante central (FR-006): ``valida is False`` implica que **no** hay
+    posición. ``x_px``, ``x_norm`` y ``error_norm`` quedan a ``None`` y la
+    confianza a ``0.0``, de modo que es imposible que el control consuma una
+    posición inventada. El error se calcula contra el ``x_objetivo``
+    configurado, no contra el centro geométrico del fotograma (FR-004).
+    """
+
+    x_px: float | None
+    x_norm: float | None
+    error_norm: float | None
+    ancho_banda_px: float
+    confianza: float
+    valida: bool
+    ultimo_lado: Lado | None = None
+
+    def __post_init__(self) -> None:
+        _exigir(self.ancho_banda_px >= 0, "ancho_banda_px debe ser >= 0")
+        _exigir(0.0 <= self.confianza <= 1.0, "confianza debe estar en [0, 1]")
+        if self.valida:
+            for nombre in ("x_px", "x_norm", "error_norm"):
+                _exigir(
+                    getattr(self, nombre) is not None,
+                    f"una posición válida exige {nombre}",
+                )
+            _exigir(0.0 <= self.x_norm <= 1.0, "x_norm debe estar en [0, 1]")
+            _exigir(self.x_px >= 0, "x_px debe ser >= 0")
+        else:
+            for nombre in ("x_px", "x_norm", "error_norm"):
+                _exigir(
+                    getattr(self, nombre) is None,
+                    f"una posición inválida no puede traer {nombre}",
+                )
+            _exigir(self.confianza == 0.0, "una posición inválida exige confianza == 0.0")
+
+
+@dataclass(frozen=True)
+class LadoConocido:
+    """Memoria del último lado en que se detectó la línea (data-model §3, FR-018).
+
+    ``fotogramas_perdidos`` arranca en 1 al primer fotograma inválido y se
+    reinicia a 0 en cada fotograma válido. Mientras sea ``<= n_gracia_busqueda``
+    el robot sigue buscando hacia ``lado``; al superarlo (fotograma N+1) el
+    control emite ``DETENER`` y congela la memoria para diagnóstico (FR-020).
+
+    Es frozen a propósito: el estado del control avanza creando instancias
+    nuevas, lo que hace que cada paso sea comparable y auditable.
+    """
+
+    lado: Lado
+    fotograma: int
+    fotogramas_perdidos: int
+
+    def __post_init__(self) -> None:
+        _exigir(self.fotograma >= 0, "fotograma debe ser >= 0")
+        _exigir(self.fotogramas_perdidos >= 0, "fotogramas_perdidos debe ser >= 0")
+
+
+@dataclass(frozen=True)
+class DecisionControl:
+    """Propuesta del control de trayectoria, antes del arbitraje de la FSM."""
+
+    comando: ComandoMovimiento
+    causa: CausaComando
+    lateral: LadoConocido | None = None
+
+
+@dataclass(frozen=True)
+class DecisionCompuesta:
+    """Comando final tras aplicar la precedencia de seguridad (data-model §7).
+
+    Invariante (FR-024, SC-007): ``causa is CausaComando.VETO_FSM`` implica
+    ``comando is ComandoMovimiento.DETENER``. El veto de la FSM PARE/SIGA se aplica
+    aquí y no antes: es el árbitro que garantiza que un PARE confirmado en un
+    fotograma no sea pisado por una corrección de dirección.
+    """
+
+    comando: ComandoMovimiento
+    causa: CausaComando
+    posicion: PosicionLinea
+    permitido: PermisoMovimiento
+
+    def __post_init__(self) -> None:
+        if self.causa is CausaComando.VETO_FSM:
+            _exigir(
+                self.comando is ComandoMovimiento.DETENER,
+                "el veto de la FSM solo puede producir DETENER",
+            )

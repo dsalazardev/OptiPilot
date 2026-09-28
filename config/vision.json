@@ -18,5 +18,16 @@
   "vertices_objetivo": 8,
   "tolerancia_vertices": 1,
   "aspecto_min": 0.70,
-  "aspecto_max": 1.40
+  "aspecto_max": 1.40,
+
+  "x_objetivo": 0.5,
+  "frac_anticipacion": 0.40,
+  "frac_pico": 0.50,
+  "umbral_confianza": 0.35,
+  "zona_muerta": 0.10,
+  "histeresis": 0.03,
+  "n_gracia_busqueda": 5,
+  "puerto_serial": null,
+  "baudrate": 9600,
+  "timeout_serial_s": 0.20
 }

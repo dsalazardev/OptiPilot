@@ -29,10 +29,10 @@ declarado.
 
 ## Phase 1: Setup
 
-- [ ] T001 Crear `src/transporte/` con `__init__.py` (paquete nuevo, fuera de `src/vision/`)
-- [ ] T002 Declarar `pyserial` en `dependencies` de `pyproject.toml` y ejecutar `uv sync` para
+- [X] T001 Crear `src/transporte/` con `__init__.py` (paquete nuevo, fuera de `src/vision/`)
+- [X] T002 Declarar `pyserial` en `dependencies` de `pyproject.toml` y ejecutar `uv sync` para
       actualizar `uv.lock` (Principio III: declarar antes de importar)
-- [ ] T003 [P] Verificar que la suite de 001 sigue verde antes de tocar nada:
+- [X] T003 [P] Verificar que la suite de 001 sigue verde antes de tocar nada:
       `uv run pytest -q` (baseline: 167 passed, 5 skipped)
 
 **Checkpoint**: entorno reproducible y línea base registrada. Si T003 falla, el problema es previo a
@@ -45,21 +45,21 @@ este cambio.
 **⚠️ CRITICAL**: ninguna historia puede empezar antes de que esta fase esté completa, porque las
 cuatro dependen de las entidades y los parámetros nuevos.
 
-- [ ] T004 [FOUND] Añadir a `src/vision/modelos.py`: `ComandoMovimiento` (StrEnum de 4 valores),
+- [X] T004 [FOUND] Añadir a `src/vision/modelos.py`: `ComandoMovimiento` (StrEnum de 4 valores),
       `Lado` (IZQUIERDA/DERECHA), `CausaComando` (8 valores, data-model §6) y `PosicionLinea`
       (frozen, con las invariantes de data-model §2) — **sin modificar** las entidades existentes
-- [ ] T005 [FOUND] Añadir a `modelos.py`: `LadoConocido` (frozen), `DecisionControl` (frozen) y
+- [X] T005 [FOUND] Añadir a `modelos.py`: `LadoConocido` (frozen), `DecisionControl` (frozen) y
       `DecisionCompuesta` (frozen, con la invariante `VETO_FSM ⟹ DETENER`)
-- [ ] T006 [FOUND] Añadir a `src/vision/configuracion.py` los 10 parámetros de control con sus
+- [X] T006 [FOUND] Añadir a `src/vision/configuracion.py` los 10 parámetros de control con sus
       defaults (`x_objetivo` 0.5, `frac_anticipacion` 0.40, `frac_pico` 0.50,
       `umbral_confianza` 0.35, `zona_muerta` 0.10, `histeresis` 0.03, `n_gracia_busqueda` 5,
       `puerto_serial` null, `baudrate` 9600, `timeout_serial_s` 0.20) leyendo de
       `config/vision.json` (no un archivo nuevo — ver contrato §1)
-- [ ] T007 [FOUND] Implementar en `configuracion.py` las 6 reglas de validación cruzada V1–V6
+- [X] T007 [FOUND] Implementar en `configuracion.py` las 6 reglas de validación cruzada V1–V6
       (contracts/esquema-configuracion.md §4), lanzando `ConfiguracionInvalidaError(campo, motivo)`
-- [ ] T008 [FOUND] [P] Escribir `tests/unit/test_configuracion.py` para los 10 parámetros: rango
+- [X] T008 [FOUND] [P] Escribir `tests/unit/test_configuracion.py` para los 10 parámetros: rango
       válido, default, y cada regla V1–V6 rechazando con el campo correcto
-- [ ] T009 [FOUND] Crear `src/transporte/base.py` con el `Protocol Transporte` (sin I/O:
+- [X] T009 [FOUND] Crear `src/transporte/base.py` con el `Protocol Transporte` (sin I/O:
       `enviar`/`cerrar`/`conectado`/`ultimo_error`)
 
 **Checkpoint**: entidades, parámetros y validación disponibles. Las 4 historias ya pueden empezar.
@@ -78,27 +78,27 @@ sintéticas, sin cámara ni robot.
 
 ### Tests for User Story 1 ⚠️ (escribir primero, deben fallar)
 
-- [ ] T010 [P] [US1] Tests unitarios de `EstimadorLinea` en
+- [X] T010 [P] [US1] Tests unitarios de `EstimadorLinea` en
       `tests/unit/test_posicion_linea.py`: línea centrada / desplazada a ambos lados; máscara vacía
       ⟹ `valida=False`; determinismo (dos llamadas, mismo resultado); `error_norm` contra
       `x_objetivo` configurable; error calculado contra el objetivo y **no** contra el centro fijo
-- [ ] T011 [P] [US1] Tests de los tres casos de pérdida de confianza en el mismo archivo: dos bandas
+- [X] T011 [P] [US1] Tests de los tres casos de pérdida de confianza en el mismo archivo: dos bandas
       de masa comparable (ambigüedad), pico en el borde de la ROI, y ruido con pico débil —
       todos deben dar `valida=False` o confianza baja
-- [ ] T012 [P] [US1] Test de cumplimiento normativo en `test_posicion_linea.py`: leer el código de
+- [X] T012 [P] [US1] Test de cumplimiento normativo en `test_posicion_linea.py`: leer el código de
       `src/vision/posicion_linea.py` y fallar si aparece `HoughLinesP`, `fitLine` o `HoughLines`
       (FR-003, Principio I y §III)
 
 ### Implementation for User Story 1
 
-- [ ] T013 [US1] Crear `src/vision/posicion_linea.py` con `EstimadorLinea.aplicar(seg)`:
+- [X] T013 [US1] Crear `src/vision/posicion_linea.py` con `EstimadorLinea.aplicar(seg)`:
       recortar la banda de lectura con `frac_anticipacion`, sumar la máscara por columna, localizar
       `argmax`, definir el soporte con `frac_pico` y calcular la media ponderada → `x_px`, `x_norm`,
       `error_norm`, `ancho_banda_px`, `confianza`, `valida`
-- [ ] T014 [US1] Implementar `confianza`: dominancia del pico (masa total vs. pico × nº de columnas),
+- [X] T014 [US1] Implementar `confianza`: dominancia del pico (masa total vs. pico × nº de columnas),
       penalización por ambigüedad y por proximidad al borde; `valida = confianza >= umbral_confianza`
       **y** pico no pegado al borde (postcondiciones Q1–Q7 del contrato)
-- [ ] T015 [US1] Verificar el determinismo (FR-008) y que no hay bucles por píxel: la implementación
+- [X] T015 [US1] Verificar el determinismo (FR-008) y que no hay bucles por píxel: la implementación
       debe vectorizarse con NumPy para cumplir el presupuesto de 33 ms (FR-010)
 
 **Checkpoint**: US1 verificable por sí sola. Ya cierra el primer consumidor de `mascara_linea`

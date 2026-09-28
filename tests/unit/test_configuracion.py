@@ -137,3 +137,128 @@ def test_reglas_de_validacion_rechazan(tmp_path: Path, datos: dict, campo: str) 
         cargar_parametros(ruta)
     assert exc.value.campo == campo
     assert exc.value.motivo
+
+
+# ---------------------------------------------------------------------------
+# Control de trayectoria (specs/002 — T008)
+# ---------------------------------------------------------------------------
+
+# (nombre, valor por defecto)
+PARAMETROS_CONTROL = [
+    ("x_objetivo", 0.5),
+    ("frac_anticipacion", 0.40),
+    ("frac_pico", 0.50),
+    ("umbral_confianza", 0.35),
+    ("zona_muerta", 0.10),
+    ("histeresis", 0.03),
+    ("n_gracia_busqueda", 5),
+    ("puerto_serial", None),
+    ("baudrate", 9600),
+    ("timeout_serial_s", 0.20),
+]
+
+
+@pytest.mark.parametrize("campo,esperado", PARAMETROS_CONTROL)
+def test_control_tiene_los_diez_parametros_con_su_default(campo: str, esperado: object) -> None:
+    assert getattr(ParametrosConfiguracion.por_defecto(), campo) == esperado
+
+
+def test_los_diez_parametros_de_control_estan_en_config_vision_json() -> None:
+    """El JSON versionado y los defaults del código deben coincidir (T006)."""
+    parametros = cargar_parametros("config/vision.json")
+    for campo, esperado in PARAMETROS_CONTROL:
+        assert getattr(parametros, campo) == esperado, campo
+
+
+def test_control_no_altera_los_parametros_de_001() -> None:
+    """FR-026 / decisión del equipo: ``t_parada_s`` y los umbrales de 001 siguen."""
+    parametros = ParametrosConfiguracion.por_defecto()
+    assert parametros.t_parada_s == 3.0
+    assert (parametros.n_confirmacion, parametros.k_tolerancia, parametros.x_rearme) == (3, 2, 5)
+    assert parametros.rango_hsv_linea == RangoHSV(0, 179, 0, 255, 0, 110)
+    assert parametros.vertices_objetivo == 8
+    assert parametros.roi_linea == RectanguloNormalizado(0.15, 0.10, 0.70, 0.45)
+
+
+def test_control_se_puede_sobreescribir_desde_json(tmp_path: Path) -> None:
+    """Cada parámetro se puede cambiar desde el JSON con un valor válido."""
+    valores = {
+        "x_objetivo": 0.42,
+        "frac_anticipacion": 0.25,
+        "frac_pico": 0.6,
+        "umbral_confianza": 0.5,
+        "zona_muerta": 0.08,
+        "histeresis": 0.02,
+        "n_gracia_busqueda": 9,
+        "puerto_serial": "COM7",
+        "baudrate": 115200,
+        "timeout_serial_s": 0.5,
+    }
+    parametros = cargar_parametros(_escribir(tmp_path, valores))
+    for campo, esperado in valores.items():
+        assert getattr(parametros, campo) == esperado, campo
+
+
+def test_puerto_serial_admite_null_explicito(tmp_path: Path) -> None:
+    """``null`` en el JSON significa transporte simulado, no un rechazo."""
+    parametros = cargar_parametros(_escribir(tmp_path, {"puerto_serial": None}))
+    assert parametros.puerto_serial is None
+
+
+def test_puerto_serial_rechaza_un_numero(tmp_path: Path) -> None:
+    with pytest.raises(ConfiguracionInvalidaError) as exc:
+        cargar_parametros(_escribir(tmp_path, {"puerto_serial": 7}))
+    assert exc.value.campo == "puerto_serial"
+
+
+# V1–V6 del contrato: cada regla cruzada, con el campo al que se atribuye el rechazo.
+REGLAS_CRUZADAS = [
+    ("V1 zona_muerta + histeresis <= 0.5", {"zona_muerta": 0.50, "histeresis": 0.05}, "zona_muerta"),
+    ("V2 zona_muerta - histeresis >= 0.0", {"zona_muerta": 0.05, "histeresis": 0.10}, "histeresis"),
+    ("V3 frac_anticipacion < 1.0", {"frac_anticipacion": 1.0}, "frac_anticipacion"),
+    ("V4 frac_pico > 0.0", {"frac_pico": 0.0}, "frac_pico"),
+    ("V5 baudrate >= 1200", {"baudrate": 960}, "baudrate"),
+    ("V6 timeout_serial_s > 0.0", {"timeout_serial_s": 0.0}, "timeout_serial_s"),
+]
+
+
+@pytest.mark.parametrize("nombre,datos,campo", REGLAS_CRUZADAS)
+def test_reglas_cruzadas_V1_V6(
+    tmp_path: Path, nombre: str, datos: dict, campo: str
+) -> None:
+    with pytest.raises(ConfiguracionInvalidaError) as exc:
+        cargar_parametros(_escribir(tmp_path, datos))
+    assert exc.value.campo == campo, nombre
+    assert exc.value.motivo
+
+
+RANGOS_RECHAZADOS = [
+    ("x_objetivo", -0.01),
+    ("x_objetivo", 1.01),
+    ("frac_anticipacion", -0.1),
+    ("frac_pico", 1.5),
+    ("umbral_confianza", 1.2),
+    ("zona_muerta", 1.2),
+    ("histeresis", -0.01),
+    ("n_gracia_busqueda", -1),
+    ("puerto_serial", "   "),
+]
+
+
+@pytest.mark.parametrize("campo,valor", RANGOS_RECHAZADOS)
+def test_rangos_de_control_rechazan(campo: str, valor: object) -> None:
+    with pytest.raises(ConfiguracionInvalidaError) as exc:
+        ParametrosConfiguracion(**{campo: valor})
+    assert exc.value.campo == campo
+
+
+def test_n_gracia_cero_es_valido_though_no_recomendado() -> None:
+    """``n_gracia_busqueda = 0`` significa DETENER inmediato, no un error."""
+    assert ParametrosConfiguracion(n_gracia_busqueda=0).n_gracia_busqueda == 0
+
+
+def test_banda_de_histresesis_valida_al_limite() -> None:
+    """Los bordes exactos de V1/V2 se aceptan: la pertenencia es inclusiva."""
+    parametros = ParametrosConfiguracion(zona_muerta=0.47, histeresis=0.03)
+    assert abs((parametros.zona_muerta + parametros.histeresis) - 0.5) < 1e-9
+    assert ParametrosConfiguracion(zona_muerta=0.03, histeresis=0.03)

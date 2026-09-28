@@ -5,6 +5,10 @@ requires-python = ">=3.14"
 dependencies = [
     "numpy>=2.4",
     "opencv-python-headless>=4.13",
+    # Canal Bluetooth Classic SPP hacia el robot (specs/002, US4/FR-028).
+    # Único uso: src/transporte/spp.py. No es un modelo aprendido, luego no
+    # viola la restricción de técnicas del Reto 1 (Principio I).
+    "pyserial>=3.5",
 ]
 
 [dependency-groups]

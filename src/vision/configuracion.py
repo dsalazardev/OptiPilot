@@ -88,6 +88,33 @@ TOLERANCIA_VERTICES_POR_DEFECTO = 1
 ASPECTO_MIN_POR_DEFECTO = 0.70
 ASPECTO_MAX_POR_DEFECTO = 1.40
 
+# --- Control de trayectoria (specs/002 — Objetivos 3 y 4 del Reto 1) ---------
+# `x_objetivo` es un parámetro, no el centro geométrico: la mediana de x por
+# video real varía entre 190.0 y 286.5 px sobre 478, así que el centro (239) no
+# describe la posición de equilibrio de ningún montaje de cámara. Provisional
+# hasta recalibrar con footage del robot montado.
+X_OBJETIVO_POR_DEFECTO = 0.5
+# Fracción superior de la ROI que se descarta antes de proyectar: la línea se
+# estrecha con la distancia y el borde inferior de la ROI es suelo en sombra.
+FRAC_ANTICIPACION_POR_DEFECTO = 0.40
+# Soporte del pico, como fracción de su altura máxima, al definir la banda.
+FRAC_PICO_POR_DEFECTO = 0.50
+# Confianza mínima para que una posición se considere válida (FR-006).
+UMBRAL_CONFIANZA_POR_DEFECTO = 0.35
+# Umbral de error bajo el cual el robot avanza recto. Medido: 40–82 % de los
+# fotogramas de rutaIdeal caen dentro con 0.10.
+ZONA_MUERTA_POR_DEFECTO = 0.10
+# Amplitud de la banda de histéresis alrededor de la zona muerta (FR-012).
+HISTERESIS_POR_DEFECTO = 0.03
+# Fotogramas de búsqueda hacia el último lado tras perder la línea. `DETENER`
+# llega en el fotograma N+1. Medido: 52.1 px/fotograma de velocidad de error en
+# desarrilamiento frente a 14.5–20.0 en rutaIdeal.
+N_GRACIA_BUSQUEDA_POR_DEFECTO = 5
+# `None` = transporte simulado, el default para que el CLI funcione sin robot.
+PUERTO_SERIAL_POR_DEFECTO: str | None = None
+BAUDRATE_POR_DEFECTO = 9600
+TIMEOUT_SERIAL_S_POR_DEFECTO = 0.20
+
 _RECT_CLAVES = ("x", "y", "w", "h")
 _RANGO_CLAVES = ("h_min", "h_max", "s_min", "s_max", "v_min", "v_max")
 _CAMPOS_CONOCIDOS = frozenset(
@@ -109,6 +136,16 @@ _CAMPOS_CONOCIDOS = frozenset(
         "tolerancia_vertices",
         "aspecto_min",
         "aspecto_max",
+        "x_objetivo",
+        "frac_anticipacion",
+        "frac_pico",
+        "umbral_confianza",
+        "zona_muerta",
+        "histeresis",
+        "n_gracia_busqueda",
+        "puerto_serial",
+        "baudrate",
+        "timeout_serial_s",
     }
 )
 
@@ -134,9 +171,22 @@ class ParametrosConfiguracion:
     tolerancia_vertices: int = TOLERANCIA_VERTICES_POR_DEFECTO
     aspecto_min: float = ASPECTO_MIN_POR_DEFECTO
     aspecto_max: float = ASPECTO_MAX_POR_DEFECTO
+    # Control de trayectoria (specs/002). Los 17 campos anteriores son de 001 y
+    # no se tocan; estos 10 son nuevos y los valida su propio bloque.
+    x_objetivo: float = X_OBJETIVO_POR_DEFECTO
+    frac_anticipacion: float = FRAC_ANTICIPACION_POR_DEFECTO
+    frac_pico: float = FRAC_PICO_POR_DEFECTO
+    umbral_confianza: float = UMBRAL_CONFIANZA_POR_DEFECTO
+    zona_muerta: float = ZONA_MUERTA_POR_DEFECTO
+    histeresis: float = HISTERESIS_POR_DEFECTO
+    n_gracia_busqueda: int = N_GRACIA_BUSQUEDA_POR_DEFECTO
+    puerto_serial: str | None = PUERTO_SERIAL_POR_DEFECTO
+    baudrate: int = BAUDRATE_POR_DEFECTO
+    timeout_serial_s: float = TIMEOUT_SERIAL_S_POR_DEFECTO
 
     def __post_init__(self) -> None:
         _validar(self)
+        _validar_control(self)
 
     @classmethod
     def por_defecto(cls) -> "ParametrosConfiguracion":
@@ -195,6 +245,64 @@ def _validar(p: ParametrosConfiguracion) -> None:
         raise ConfiguracionInvalidaError(
             "aspecto_min", "se requiere 0 < aspecto_min ≤ aspecto_max"
         )
+
+
+def _validar_control(p: ParametrosConfiguracion) -> None:
+    """Reglas del bloque de control de trayectoria (V1–V6 del contrato).
+
+    Se validan aparte de las de 001 para que el motivo del rechazo apunte al
+    campo del control y no se mezcle con los umbrales de señal.
+    """
+    if not 0.0 <= p.x_objetivo <= 1.0:
+        raise ConfiguracionInvalidaError(
+            "x_objetivo", "debe estar en [0, 1] como fracción del ancho del fotograma"
+        )
+    if not 0.0 <= p.frac_anticipacion < 1.0:
+        raise ConfiguracionInvalidaError(
+            "frac_anticipacion",
+            "debe estar en [0, 1): con 1.0 la banda de lectura quedaría vacía",
+        )
+    if not 0.0 < p.frac_pico <= 1.0:
+        raise ConfiguracionInvalidaError(
+            "frac_pico",
+            "debe estar en (0, 1]: con 0 el soporte sería toda la ROI y el centroide caería "
+            "en el centro global en vez de en el de la línea",
+        )
+    if not 0.0 <= p.umbral_confianza <= 1.0:
+        raise ConfiguracionInvalidaError("umbral_confianza", "debe estar en [0, 1]")
+    if not 0.0 <= p.zona_muerta <= 1.0:
+        raise ConfiguracionInvalidaError("zona_muerta", "debe estar en [0, 1]")
+    if p.histeresis < 0.0:
+        raise ConfiguracionInvalidaError("histeresis", "debe ser >= 0")
+    # V1: con un umbral efectivo >= 0.5 el robot quedaría ciego a media pista.
+    if p.zona_muerta + p.histeresis > 0.5:
+        raise ConfiguracionInvalidaError(
+            "zona_muerta",
+            "zona_muerta + histeresis no puede superar 0.5: el robot quedaría ciego a media pista",
+        )
+    # V2: por debajo de 0 el umbral de retorno sería negativo y la histéresis
+    # no tendría banda, con lo que la conmutación sería ambigua.
+    if p.zona_muerta - p.histeresis < 0.0:
+        raise ConfiguracionInvalidaError(
+            "histeresis",
+            "histeresis no puede superar zona_muerta: el umbral de retorno sería negativo",
+        )
+    if p.n_gracia_busqueda < 0:
+        raise ConfiguracionInvalidaError(
+            "n_gracia_busqueda",
+            "debe ser >= 0 (0 significa DETENER inmediato tras perder la línea)",
+        )
+    if p.puerto_serial is not None and not str(p.puerto_serial).strip():
+        raise ConfiguracionInvalidaError(
+            "puerto_serial", "debe ser un puerto no vacío o null (transporte simulado)"
+        )
+    # V5: por debajo de 1200 baudios la trama de 4 bytes no es fiable con un
+    # ATmega a 16 MHz.
+    if p.baudrate < 1200:
+        raise ConfiguracionInvalidaError("baudrate", "debe ser >= 1200")
+    # V6: con 0 el puerto quedaría en modo bloqueante infinito.
+    if p.timeout_serial_s <= 0.0:
+        raise ConfiguracionInvalidaError("timeout_serial_s", "debe ser > 0")
 
 
 def _validar_rectangulo(campo: str, rectangulo: RectanguloNormalizado) -> None:
@@ -322,6 +430,18 @@ def _leer_numero(datos: Mapping[str, Any], campo: str, defecto: float) -> float:
     return _como_numero(campo, datos[campo])
 
 
+def _leer_texto_opcional(datos: Mapping[str, Any], campo: str, defecto: str | None) -> str | None:
+    """Lee un campo de texto que admite ``null`` (p. ej. ``puerto_serial``)."""
+    if campo not in datos:
+        return defecto
+    bruto = datos[campo]
+    if bruto is None:
+        return None
+    if not isinstance(bruto, str):
+        raise ConfiguracionInvalidaError(campo, "debe ser una cadena o null")
+    return bruto
+
+
 def _fusionar(datos: Mapping[str, Any]) -> ParametrosConfiguracion:
     desconocidos = sorted(set(datos) - _CAMPOS_CONOCIDOS)
     if desconocidos:
@@ -351,6 +471,20 @@ def _fusionar(datos: Mapping[str, Any]) -> ParametrosConfiguracion:
         ),
         aspecto_min=_leer_numero(datos, "aspecto_min", defecto.aspecto_min),
         aspecto_max=_leer_numero(datos, "aspecto_max", defecto.aspecto_max),
+        x_objetivo=_leer_numero(datos, "x_objetivo", defecto.x_objetivo),
+        frac_anticipacion=_leer_numero(datos, "frac_anticipacion", defecto.frac_anticipacion),
+        frac_pico=_leer_numero(datos, "frac_pico", defecto.frac_pico),
+        umbral_confianza=_leer_numero(datos, "umbral_confianza", defecto.umbral_confianza),
+        zona_muerta=_leer_numero(datos, "zona_muerta", defecto.zona_muerta),
+        histeresis=_leer_numero(datos, "histeresis", defecto.histeresis),
+        n_gracia_busqueda=_leer_entero(
+            datos, "n_gracia_busqueda", defecto.n_gracia_busqueda
+        ),
+        puerto_serial=_leer_texto_opcional(datos, "puerto_serial", defecto.puerto_serial),
+        baudrate=_leer_entero(datos, "baudrate", defecto.baudrate),
+        timeout_serial_s=_leer_numero(
+            datos, "timeout_serial_s", defecto.timeout_serial_s
+        ),
     )
 
 

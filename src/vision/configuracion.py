@@ -65,7 +65,7 @@ class RectanguloNormalizado:
     h: float
 
 
-ROI_LINEA_POR_DEFECTO = RectanguloNormalizado(x=0.15, y=0.55, w=0.70, h=0.45)
+ROI_LINEA_POR_DEFECTO = RectanguloNormalizado(x=0.15, y=0.10, w=0.70, h=0.45)
 ROI_SENALES_POR_DEFECTO = RectanguloNormalizado(x=0.10, y=0.05, w=0.80, h=0.55)
 RANGO_HSV_LINEA_POR_DEFECTO = RangoHSV(h_min=0, h_max=179, s_min=0, s_max=255, v_min=0, v_max=110)
 RANGOS_HSV_ROJO_POR_DEFECTO = (

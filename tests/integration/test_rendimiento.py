@@ -284,10 +284,10 @@ def test_un_fotograma_de_tamano_reducido_no_rompe_el_pipeline(
     resultado = pipeline.procesar(0, 0.0, np.zeros((10, 10, 3), dtype=np.uint8))
     assert resultado.senales_confirmadas == []
     assert resultado.segmentacion.mascara_linea.shape == (10, 10)
-    # roi_linea (0.15, 0.55, 0.70, 0.45) sobre 10×10 ⇒ origen (2, 6) y la caja
+    # roi_linea (0.15, 0.10, 0.70, 0.45) sobre 10×10 ⇒ origen (2, 1) y la caja
     # recortada al borde de la imagen.
     x, y, ancho, alto = resultado.segmentacion.roi_linea
-    assert (x, y) == (2, 6)
+    assert (x, y) == (2, 1)
     assert x + ancho <= 10 and y + alto <= 10
 
 

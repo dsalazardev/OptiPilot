@@ -18,6 +18,8 @@ ROJO_BGR = (30, 30, 220)
 VERDE_BGR = (60, 200, 60)
 LINEA_BGR = (40, 40, 40)
 LADOS_OCTAGONO = 8
+BANDA_LINEA_INICIO = 0.10
+BANDA_LINEA_FIN = 0.55
 
 __all__ = [
     "ALTO_POR_DEFECTO",
@@ -35,6 +37,8 @@ __all__ = [
     "fotograma_con_senal",
     "fotograma_vacio",
     "puntos_octagono",
+    "BANDA_LINEA_INICIO",
+    "BANDA_LINEA_FIN",
 ]
 
 
@@ -84,13 +88,23 @@ def dibujar_linea_vertical(
     x_centro: int,
     grosor: int,
     color_bgr: tuple[int, int, int] = LINEA_BGR,
+    y_inicio: float = BANDA_LINEA_INICIO,
+    y_fin: float = BANDA_LINEA_FIN,
 ) -> None:
-    """Dibuja una línea vertical desde el borde inferior hasta la mitad del cuadro."""
+    """Dibuja una línea vertical dentro de la banda ``y_inicio``-``y_fin``.
+
+    Las fracciones son del alto del fotograma y replican ``roi_linea`` de
+    ``config/vision.json``, calibrada contra el footage real: la banda guía es
+    contigua en ``y`` 0.10-0.55 y la mitad inferior del cuadro es suelo cercano
+    con sombra, no línea.
+    """
     alto = imagen.shape[0]
+    y0 = int(round(y_inicio * alto))
+    y1 = max(y0 + 1, int(round(y_fin * alto)) - 1)
     cv2.rectangle(
         imagen,
-        (x_centro - grosor // 2, alto // 2),
-        (x_centro + grosor // 2, alto - 1),
+        (x_centro - grosor // 2, y0),
+        (x_centro + grosor // 2, y1),
         color_bgr,
         thickness=-1,
     )

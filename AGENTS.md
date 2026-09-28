@@ -397,10 +397,32 @@ All four are **class materials authored for Google Colab** (embedded outputs and
 
 ## 16. Development Environment
 
-- Windows 11 machine; the repo lives at `D:\Universidad de Caldas\Noveno semestre\Vision Artificial En Tiempo Real\OptiPilot` (it was formerly under OneDrive; that path no longer exists, and the IDE SDK path in `.idea/misc.xml` is stale as a result). New effect of the move: the practice footage documented in `documents/videos/` was never committed and did not come across — see §27.14.
+- Windows 11 machine; the repo lives at `D:\Universidad de Caldas\Noveno semestre\Vision Artificial En Tiempo Real\OptiPilot` (it was formerly under OneDrive; that path no longer exists, and the IDE SDK path in `.idea/misc.xml` is stale as a result). The practice footage was never committed; it has since been re-obtained locally under `videos/` but stays untracked — see §27.14.
 - The venv was created with **uv 0.12.15** using a uv-managed CPython 3.14.7 (see `pyvenv.cfg`). There is **no `pip` module inside `.venv`** — install extra packages with `uv pip install <pkg> --python .venv/Scripts/python.exe` (or recreate managed by uv). `uv.lock` is checked in, so the environment is reproducible with `uv sync`.
 - **Resolved gap:** `import cv2` now works — `opencv-python-headless` is declared in `pyproject.toml` and installed. The class notebooks can run locally, except notebook 4's Colab-only `google.colab.files.upload` call (§14).
 - PyCharm is the IDE (`.idea/`): project SDK points at `.venv`; module type derives from `pyproject.toml`.
+
+### 16.1 `roi_linea` recalibrated against real footage (2026-09-28)
+
+`roi_linea.y` moved from `0.55` to `0.10`. Measured on 460 sampled frames across all 9 videos (`videos/*/*.mp4`, 478×850):
+
+| | `y=0.55` (antes) | `y=0.10` (ahora) |
+|---|---|---|
+| Occupancy of the ROI by the mask | 54.7 % median | **13.3 %** median |
+| Widest horizontal run | 334 px | **71 px** |
+| Frames with >60 % occupancy | 107 / 460 | **1 / 460** |
+
+Why: the camera looks **down** at the track, so the guide band is contiguous in the **upper** half (`y` ≈ 100–450, 50–60 px wide, centre `x` ≈ 200–290) and narrows with distance. The lower half (`y` > 550) is near floor in shadow — fragments, not a band. The old ROI selected the shadow, which is why the mask was 235 px wide on average.
+
+Changed together (config + code default + tests must stay in sync):
+- `config/vision.json` → `roi_linea.y = 0.10`
+- `src/vision/configuracion.py` → `ROI_LINEA_POR_DEFECTO` (the file mirrors the code default; keep them equal)
+- `tests/fixtures/generador_sintetico.py` → `dibujar_linea_vertical` now draws inside the band `BANDA_LINEA_INICIO=0.10`..`BANDA_LINEA_FIN=0.55` instead of the bottom half
+- `tests/unit/test_configuracion.py`, `tests/integration/test_rendimiento.py` → updated expected values
+
+`roi_senales` was **not** changed. Suite after the change: `167 passed, 5 skipped`; `-m perf`: `14 passed`.
+
+**Still open:** mask *thickness*. The measured band is ~50–70 px but the contract's reference is a ~3 px centre line, so SC-010 IoU is still not reachable (§27.12).
 
 ---
 
@@ -590,10 +612,15 @@ Recorded during the audit; each item is factual with evidence:
 8. **Template artefacts in `.gitignore`:** `.ruff_cache/` and `pyrightconfig.json` are mentioned but neither tool is configured; don't assume tooling from the ignore file.
 9. **`.idea/` tracked against template advice:** 7 IDE files are committed while the template suggests ignoring `.idea/`; `workspace.xml` is untracked. If this is not intentional, decide explicitly (a change).
 10. **No README/name definition:** "OptiPilot" appears only in `pyproject.toml`, `.idea/` files, and paths; the repo contains no description of the project beyond the academic documents.
-11. **No signal detection demonstrated on real footage:** the 9 practice videos (not present in this copy, §27.14) were recorded as yielding **0 confirmations** (T027 investigation, 2026-09-28). `approxPolyDP` with `EPSILON_APROX=0.03` is *not* the cause — a relaxed-threshold sweep found 305 contours that already satisfy the shape criterion (7-9 vertices, aspect 0.7-1.4), but **304 of 305 lie below `roi_senales`**, i.e. the ROI excludes them. `roi_senales` covers the top 60% of the frame while this footage appears to be shot looking *down* at the track. This is a real calibration gap, but it belongs to the detection stages (Fases 3-5), not to Fase 6-7; do not fix it opportunistically.
-12. **Line mask is not IoU-ready:** `rango_hsv_linea` (`v_max: 110`) lights up ~55-99 % of the line ROI on real footage, and the contract's reference is a ~3 px centre line. The theoretical IoU ceiling is `3/W`, so a mask wider than 5 px **cannot** reach SC-010's 0.60 threshold. Measured 0.125 against a synthetic 3 px reference. Any future SC-010 work must first decide the annotation thickness vs. predicted width.
+11. **The practice footage contains no detectable PARE/SIGA signs.** Re-measured locally on all 9 real videos (2026-09-28, 687 frames sampled 1/4, `segmentacion` + `candidatos` used directly, not the CLI summary). Every red/green blob fails the shape filter for a geometric reason, and no `approxPolyDP` epsilon fixes it:
+    - **Red blobs** (642): median aspect **2.47**, median circularity **0.293** (an octagon is ~0.8-0.9), median solidity 0.72. They are elongated strips, not polygons.
+    - **Green blobs** (1391): median aspect 1.29, median circularity **0.590**, solidity 0.916 — round-ish but not octagonal.
+    - **Epsilon sweep** (share of blobs with 7-9 vertices): red 14.0% @0.005, 49.7% @0.02, 9.2% @0.03; green 3.7% @0.005, 37.2% @0.02, 9.6% @0.03. No epsilon produces a reliable 8-vertex population, so `EPSILON_APROX=0.03` is **not** the lever.
+    - **Correction of an earlier finding:** the previous T027 note claimed 304 of 305 shape-passing contours lay *outside* `roi_senales`. Re-measured, the extracted contours' centres lie *inside* the current ROI (y≈49-501); they are discarded for **vertex count** (67.6% have 4 vertices), not for being excluded by the ROI. The conclusion "0 confirmations" is unchanged, but the cause is different and the ROI was not the reason.
+    - The videos are line-following footage (`rutaIdeal`, `desarrilamiento`); **they do not appear to contain the octagonal signs at all**. 0 confirmations is the correct result, not a tuning failure. Any future sign-detection tuning needs footage that actually shows PARE/SIGA.
+12. **Line mask is not IoU-ready:** `rango_hsv_linea` (`v_max: 110`) lights up ~55-99 % of the line ROI on real footage, and the contract's reference is a ~3 px centre line. The theoretical IoU ceiling is `3/W`, so a mask wider than 5 px **cannot** reach SC-010's 0.60 threshold. Measured 0.125 against a synthetic 3 px reference. Any future SC-010 work must first decide the annotation thickness vs. predicted width. **Resolved for geometry on 2026-09-28:** `roi_linea` was recalibrated from `y=0.55` to `y=0.10` (see §16.1); occupancy of the ROI dropped from a 54.7 % median (334 px runs) to 13.3 % (71 px runs). Thickness remains open.
 13. **Fixture geometry differs from footage:** synthetic frames are 640×480 landscape; the real videos are 478×850 portrait. Integration tests therefore do not exercise the geometry they will be judged on.
-14. **The practice footage does not exist in this copy:** the 9 videos documented in `documents/videos/VideosPruebaRobotSeguidorLinea/` are **not on disk** and were never tracked — `.gitignore:180` ignores `videos/` (verified with `git check-ignore`). They lived in the former OneDrive path and did not come across in the move to `D:`. Consequence: every "verified on the 9 real videos" claim in `specs/001-cv-sign-detection/` (quickstart §evaluación, checklist CHK036, tasks T027–T028) was measured elsewhere and is **not reproducible here** until the corpus is obtained. §27.11–27.13 remain valid as *recorded findings* but cannot be re-run locally.
+14. **The practice footage is present but untracked:** the 9 videos live in `videos/desarrilamiento/` (5) and `videos/rutaIdeal/` (4), **not** in `documents/videos/`; they were re-obtained locally on 2026-09-28 and are deliberately **not versioned** — `.gitignore:180` ignores `videos/` (verified with `git check-ignore`). They are 478×850 portrait, 2730 frames total. Anyone cloning the repo will not have them; re-verify §27.11–27.13 locally before repeating any claim about "the 9 real videos".
 
 ---
 

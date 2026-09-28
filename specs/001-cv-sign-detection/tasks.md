@@ -138,6 +138,17 @@ mientras la referencia del contrato son 3 px. El techo del IoU es `3/W`, luego *
 de 6 px o más puede alcanzar 0.60**. La polaridad y el grosor de la predicción deben decidirse
 antes de que SC-010 sea evaluable; se documenta en `AGENTS.md` §27.12 y no se corrige aquí
 porque pertenece a las etapas de segmentación (Fases 3–5).
+
+**Deuda de IoU ampliada con footage real (2026-09-28)**: la discrepancia no es un artefacto del
+fixture sintético, es la geometría real del problema. Medido sobre los 9 videos (`478×850`), la
+banda guía real mide **~50–70 px** de ancho (mediana de 71 px en el run horizontal más ancho tras
+la recalibración de `roi_linea`, ver `AGENTS.md` §16.1). Es decir, la referencia del contrato
+(3 px) y la predicción real (~50–70 px) discrepan en un orden de magnitud, y el techo del IoU
+`3/W` hace SC-010 inalcanzable con umbrales actuales. **Decisión pendiente y bloqueante para
+SC-010**: (a) engrosar la referencia del contrato para que represente la banda pintada y no una
+línea de centro, o (b) estrechar la predicción esqueleto de la banda con morphology/erosión. No se
+toma aquí: es un cambio de contrato que altera la definición de un criterio de éxito, y excede la
+calibración de ROI. Se cierra junto con la Spec de Control de Trayectoria.
 - [X] T028 [P] Benchmark de latencia en `tests/integration/test_rendimiento.py`: marcado `perf`; mediana ≤ 33 ms por fotograma 640×480 sintético en 100 fotogramas; no bloqueante por defecto (depende de T013)
 
 **Checkpoint**: Sistema completo verificado de extremo a extremo

@@ -34,7 +34,7 @@ def test_por_defecto_tiene_los_valores_del_contrato() -> None:
     assert (parametros.vertices_objetivo, parametros.tolerancia_vertices) == (8, 1)
     assert parametros.presupuesto_latencia_frames == 8
     assert parametros.kernel_morfologico_px == 5
-    assert parametros.roi_linea == RectanguloNormalizado(0.15, 0.55, 0.70, 0.45)
+    assert parametros.roi_linea == RectanguloNormalizado(0.15, 0.10, 0.70, 0.45)
     assert parametros.roi_senales == RectanguloNormalizado(0.10, 0.05, 0.80, 0.55)
     assert parametros.rangos_hsv_rojo == (
         RangoHSV(0, 10, 120, 255, 90, 255),

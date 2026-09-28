@@ -68,7 +68,15 @@ class MetricasCorrida:
     def registrar_fotograma(self, latencia_ms: float) -> None: ...
     def registrar_evento(self, evento: EventoSenal) -> None: ...
     def registrar_transicion(self, transicion: TransicionEstado) -> None: ...
-    def registrar_senal(self, senal: SenalConfirmada, anotada: bool) -> None: ...
+    def registrar_senal(
+        self,
+        senal: SenalConfirmada,
+        anotada: bool | None = None,
+        clase_anotada: ClaseSenal | None = None,
+    ) -> None:
+        """`anotada` tiene tres estados: None = sin referencia (solo cuenta la
+        ocurrencia, sin juzgar); True/False separa acierto de falso positivo; si
+        además difiere `clase_anotada`, cuenta una confusión PARE↔SIGA."""
     def registrar_parada(self, parada: Parada) -> None: ...
     def registrar_decision_latencia(self, frames: int, ms: float) -> None:
         """Latencia por ocurrencia: del marcador de visibilidad plena (Q2) a la decisión."""

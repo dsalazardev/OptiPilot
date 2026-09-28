@@ -2,12 +2,10 @@
 
 **Bootstrap and operating manual for AI agents working in this repository.**
 
-- **Generated:** 2026-09-22 (from a full read-only inspection of the repository).
-- **Basis:** commit `5ab3a2a` on `main` — identical to `origin/main` at generation time — 79 tracked files, all inspected, including binary academic materials, Jupyter notebooks, and the four AI-agent tool trees.
-- **Repo path:** `C:\Users\USUARIO\OneDrive\Escritorio\ARCHIVOS\DESARROLLO\OptiPilot`
-- **Remote:** https://github.com/dsalazardev/OptiPilot (branch `main`).
-- **Change policy of this document:** creating `AGENTS.md` was the **only** modification allowed during the analysis. No code, dependency, configuration, or academic material was changed. Everything below is traceable to files in the repository. Where a statement is an inference from evidence it is marked **«INFERENCE»**; where something does not exist yet it is marked **«NOT IMPLEMENTED»**.
-- **Language:** this document is written in English (standard for agent bootstrap files); the project's source material is in Spanish. Keep Spanish domain terms verbatim: *Reto 1, PARE, SIGA, rúbrica, descarrilamiento*.
+- **Generated:** 2026-09-22 (de una inspección de solo lectura del repositorio).
+- **Última actualización:** 2026-09-28 (T029, tras completar las Fases 3–6). Las secciones §3, §4, §9–§11 y §13–§14 conservan su contenido original porque siguen siendo válidos; **§1, §5, §6, §7, §12, §16–§19 y §27 se reescribieron** para reflejar el estado real.
+- **Basis:** rama `dev`. Al generar el documento, `main` estaba en `7ae33ac` y `dev` en `10c7a8e` (Fase 5). El trabajo de Fases 6–7 se entrega sobre `dev`.
+- **Language:** este documento está en inglés (estándar para archivos bootstrap de agentes); el material de origen del proyecto está en español. Conserva en español los términos del dominio: *Reto 1, PARE, SIGA, rúbrica, descarrilamiento*.
 
 ---
 
@@ -22,16 +20,16 @@ Read order for a new agent joining this project:
 | 3 | `documents/markdawn/Rubrica-Reto-1.md` | How the work is evaluated (12 criteria) |
 | 4 | `documents/markdawn/FundamentosVisionArtificial.md` + `documents/markdawn/18-K-MEANS-Basico.md` | The allowed technique toolbox (course material) |
 | 5 | `openspec/config.yaml`, then run `openspec list --json` | Workflow configuration and current change state |
-| 6 | `pyproject.toml`, `src/**` | The actual (tiny) code state |
+| 6 | `pyproject.toml`, `src/**`, `tests/**` | The actual code and test state |
 
-Re-verification quick commands (run from the repo root; bash on this machine):
+Re-verification quick commands (run from the repo root):
 
 ```bash
-git rev-parse HEAD origin/main      # sync state (both must match unless work is in flight)
-git status --short                  # working tree state
-openspec list --json                # active OpenSpec changes (currently: none)
-openspec --version                  # CLI version (1.13.1 at generation time)
-git ls-files | wc -l                # tracked files (79 at generation time)
+git rev-parse --abbrev-ref HEAD   # expect: dev
+git status --short                # working tree state
+uv run pytest -q                  # full suite (167 passed, 5 skipped)
+openspec list --json              # active OpenSpec changes
+openspec --version                # CLI version
 ```
 
 ---
@@ -40,21 +38,23 @@ git ls-files | wc -l                # tracked files (79 at generation time)
 
 **OptiPilot** is the working name (appears only in `pyproject.toml` and `.idea/optipilot.iml`; there is no README) of an academic software project whose goal is the **"Reto 1" of a computer-vision course at Universidad de Caldas**: the *brain* of an autonomous line-following robot that uses a camera, classical image processing only, and must react to two traffic signs (red octagon = **PARE** / stop; green octagon = **SIGA** / go).
 
-**Current reality (do not skip):** the repository contains **documentation, course materials, tooling configuration, and an empty Python skeleton**. There is **no application logic implemented yet** — no image processing pipeline, no line detection, no sign detection, no control, no camera interface. The only Python file with content is the unmodified PyCharm sample script `src/main.py`.
+**Current reality (do not skip):** the repository contains **a working, tested implementation** of the vision pipeline, the deterministic state machine, run metrics, a validation CLI, and 167 automated tests. What does **not** exist yet: the annotated reference corpus needed to score SC-010, the teacher's stop duration, any hardware/actuator interface, and the poster.
 
 **Status snapshot**
 
 | Area | State | Evidence |
 |------|-------|----------|
 | Academic materials (challenge, rubric, class decks, notebooks) | Present — source of truth | `documents/**` |
-| Python project skeleton | Partial scaffold | `pyproject.toml`, `src/` (empty `__init__.py` files + sample script) |
-| Implementation (CV pipeline, control, signals) | **NOT IMPLEMENTED** | nothing in `src/` beyond the sample |
-| Tests | Absent | no test files or configs anywhere |
-| CI/CD | Absent for the product; 1 generated Copilot-setup workflow | `.github/workflows/copilot-setup-steps.yml` |
-| OpenSpec | Initialized; **zero changes, zero specs** | `openspec/`, `openspec list --json` → `"changes": []` |
-| AI-agent tooling | Present — generated for 4 tool targets | `.agents/`, `.claude/`, `.opencode/`, `.github/` |
-| Python environment | Partial: Python 3.14.7 uv venv; **no OpenCV installed** | `.venv/pyvenv.cfg`, `.venv/Lib/site-packages` |
-| Git | Single commit `5ab3a2a` "feat(doc): add a documents of class"; in sync with `origin/main` | `git log`, `git ls-remote` |
+| CV pipeline (preprocess → segment → candidates → confirm) | **Implemented** | `src/vision/{preprocesamiento,segmentacion,candidatos,deteccion,pipeline}.py` |
+| Deterministic FSM (PARE stops, SIGA resumes) | **Implemented** | `src/vision/maquina_estados.py` |
+| Run metrics + visualization + validation CLI | **Implemented** | `src/vision/metricas.py`, `visualizacion.py`, `src/main.py` |
+| Tests | **Present** — 167 passing (92 unit, 75 integration) | `tests/unit/`, `tests/integration/` |
+| Reference annotation corpus (SC-010 ground truth) | **Absent** — required by `contracts/anotacion-referencia.md` §2 | no `anotacion_linea.json` in the repo |
+| Real footage | Present (9 videos, portrait 478×850) | `documents/videos/VideosPruebaRobotSeguidorLinea/` |
+| Signal detection on real footage | **Not demonstrated** — 0 confirmations observed | see §27 |
+| CI/CD for the product | Absent; 1 generated Copilot-setup workflow | `.github/workflows/copilot-setup-steps.yml` |
+| Python environment | Complete: CPython 3.14 + OpenCV + NumPy + pytest | `.venv/`, `pyproject.toml` |
+| Git | Work delivered on branch `dev`; `origin/main` still at Fase 2 | `git log`, `git branch -av` |
 
 ---
 
@@ -126,27 +126,38 @@ Sources (equivalent content; verified line-by-line against each other): `documen
 Classification of everything in the repo (the distinction between documentation and implementation is critical here):
 
 **Implemented**
-- Git repository with a single commit; local `main` == `origin/main`.
-- PyCharm project files (`.idea/**`, 7 tracked files).
-- OpenSpec initialization (`openspec/config.yaml`, `specs/`, `changes/archive/` with `.gitkeep` files).
+- Git repository; work delivered on branch `dev` (`origin/main` remains at Fase 2).
+- PyCharm project files (`.idea/**`).
+- OpenSpec initialization (`openspec/config.yaml`, `specs/`, `changes/archive/`).
 - OpenSpec-generated agent tooling for 4 tool targets (§22–23).
 - Academic material set in `documents/**` (available, not authored by the repo owner).
+- **Full CV pipeline** in `src/vision/`, stage by stage, all using allowed techniques only:
+  - `preprocesamiento.py` — Gaussian blur (5×5), BGR→HSV, ROI cropping (T009).
+  - `segmentacion.py` — HSV `inRange` masks for line/red/green, morphological open+close (T010).
+  - `candidatos.py` — `findContours` + `approxPolyDP`, area/aspect/vertex filters (T011).
+  - `deteccion.py` — temporal confirmation (N=3) with tolerance K=2 and re-arm (T012).
+  - `pipeline.py` — orchestration, degradation, per-stage diagnostics (T013).
+  - `maquina_estados.py` — deterministic FSM; PARE stops, SIGA resumes (T018).
+  - `metricas.py` / `visualizacion.py` — run metrics and annotated frames (T020–T021).
+- Configuration in `config/vision.json`, validated on load by `configuracion.py`.
+- Validation CLI `src/main.py` (`--fuente`, `--config`, `--diagnostico`, `--salida`, `--max-fotogramas`, `--anotacion`).
+- 167 automated tests: 92 unit (`tests/unit/`) + 75 integration (`tests/integration/`).
 
-**Partially implemented**
-- Python project scaffold: `pyproject.toml` declares `optipilot` 0.1.0, `requires-python = ">=3.14"`, **`dependencies = []`**; `src/__init__.py`, `src/models/__init__.py`, `src/services/__init__.py` are 0-byte package markers; `src/main.py` is the untouched PyCharm sample (`print_hi('PyCharm')`).
-- Local environment: `.venv` (Python 3.14.7, uv-managed) with `numpy 2.5.3`, `scipy 1.18.1`, `scikit-learn 1.9.1`, `matplotlib 3.11.2`, `pillow 12.3.0` (+ transitive deps) — but **no OpenCV (`cv2`), no Jupyter, and no `pip` module inside the venv**.
-
-**Documented but NOT implemented** (everything about the robot behavior):
-- any camera capture; line detection; ROI/segmentation logic; centroid/position math; control; signal detection; stop/go state machine; robot↔computer communication; tests; logging; poster material generation.
+**Documented but NOT implemented** (the robot/actuator boundary)
+- Any camera capture on the real robot (the CLI opens files/indices; the camera is untested).
+- Motor/actuator control: the FSM emits `DecisionMovimiento` *verdicts*, nothing drives wheels.
+- The annotated reference corpus (`anotacion_linea.json` + PNG masks) for SC-010.
+- The poster / visual material.
+- PARE stop duration is provisional (`t_parada_s: 3.0`), pending the teacher's value.
 
 **Planned / configured**
-- OpenSpec `spec-driven` workflow is armed (schema configured, agent tooling generated) but **no change has been created yet** (`openspec list --json` → empty).
-- GitHub Copilot cloud-agent support is enabled (`openspec/config.yaml` → `githubCopilot.cloudAgent: true`) with a setup workflow.
+- OpenSpec `spec-driven` workflow is armed; change `001-cv-sign-detection` is archived under `openspec/changes/archive/`.
+- GitHub Copilot cloud-agent support is enabled (`openspec/config.yaml` → `githubCopilot.cloudAgent: true`).
 
 **Undetermined**
-- Robot platform/hardware, camera model, communication interface (serial? BLE? none of it is mentioned in the repo).
-- PARE stop duration value; track/sign geometry; team composition; poster format requirements.
-- Whether `src/models` and `src/services` are meant as architecture layers at all — the folders exist but nothing defines their role. Do **not** treat their names as proof of an architecture.
+- Robot platform/hardware, camera model, communication interface.
+- PARE stop duration; track/sign geometry; team composition; poster format.
+- Whether `src/models/` and `src/services/` are meant as architecture layers — the folders still contain only 0-byte `__init__.py`; the real code lives in `src/vision/`. Do **not** treat their names as evidence of an architecture.
 
 ---
 
@@ -173,19 +184,23 @@ OptiPilot/
 │   ├── commands/opsx-{...}.md
 │   └── skills/openspec-*/SKILL.md
 ├── .venv/                         # local uv venv, Python 3.14.7 — git-ignored, NOT part of the repo
+├── config/                        # vision.json — the only runtime configuration
+│   └── vision.json
 ├── documents/                     # academic source material (16 MB)
 │   ├── documents/                 #   binaries: Reto-1.docx, Rubrica-Reto-1.xlsx,
 │   │                              #   18-K-MEANS-Basico.pptx, FundamentosVisionArtificial.pdf
 │   ├── ipynb/                     #   4 class notebooks (Colab-style)
-│   └── markdawn/                  #   markdown transcriptions (folder name is a typo of "markdown";
-│                                  #   kept as-is — do not rename without an explicit decision)
+│   ├── markdawn/                  #   markdown transcriptions (folder name is a typo of "markdown";
+│   │                              #   kept as-is — do not rename without an explicit decision)
+│   └── videos/                    #   9 real practice videos (portrait 478×850, 17.16–27.84 fps)
 ├── openspec/                      # config.yaml + specs/ + changes/archive/ (both empty with .gitkeep)
+├── src/                           # Python package — see §11 for the real layout
+├── tests/                         # unit/ (92) + integration/ (75) — see §18
 ├── .gitignore                     # Toptal "python" template (see §14)
-├── pyproject.toml                 # the only project config (5 lines)
-└── src/                           # Python package skeleton (see §11)
+└── pyproject.toml                 # deps, pytest config and markers
 ```
 
-Missing on purpose/absence: no `README*`, no `LICENSE`, no `CONTRIBUTING`, no `tests/`, no `uv.lock`, no `.env*`, no product CI workflows, no `AGENTS.md` before this file.
+Missing on purpose/absence: no `README*`, no `LICENSE`, no `CONTRIBUTING`, no product CI workflows, no `uv.lock`.
 
 ---
 
@@ -194,44 +209,44 @@ Missing on purpose/absence: no `README*`, no `LICENSE`, no `CONTRIBUTING`, no `t
 | Layer | What is actually used | Evidence |
 |-------|----------------------|----------|
 | Language | Python — declared `>=3.14` | `pyproject.toml` → `requires-python` |
-| Local runtime | CPython **3.14.7**, uv-managed venv (**uv 0.12.15**) | `.venv/pyvenv.cfg`, `.venv/Scripts/python.exe --version` |
-| Dependency management | Declared: none (`dependencies = []`); Installed in venv: numpy, scipy, scikit-learn, matplotlib, pillow (+ deps) | `pyproject.toml`, `.venv/Lib/site-packages` |
-| **Missing for the challenge** | **OpenCV (`cv2` is imported by all class notebooks but is NOT installed)**; Jupyter (notebooks are Colab-authored) | site-packages listing |
-| Notebooks (class material) | Google Colab style: `cv2`, `numpy`, `matplotlib`, `sklearn`; `google.colab` in notebook 4 | `documents/ipynb/*` |
+| Local runtime | CPython **3.14.7**, uv-managed venv | `.venv/pyvenv.cfg`, `.venv/Scripts/python.exe --version` |
+| Dependency management | Declared: `numpy>=2.4`, `opencv-python-headless>=4.13`; dev group: `pytest>=8` | `pyproject.toml` |
+| Computer vision | **OpenCV** (`opencv-python-headless`) — `cvtColor`, `inRange`, `morphologyEx`, `findContours`, `approxPolyDP`, `arcLength`, `boundingRect`, `VideoCapture`, `imwrite` | `src/vision/**`, `src/main.py` |
+| Numerics | NumPy — masks as boolean/uint8 arrays, ROI boolean algebra | `src/vision/**` |
+| Tests | pytest with two custom markers: `footage` (opt-in real video) and `perf` (benchmark) | `pyproject.toml` → `[tool.pytest.ini_options]` |
 | Agent/workflow tooling | OpenSpec CLI **1.13.1** (`npm install -g @fission-ai/openspec`); generated files stamped `generatedBy: "1.13.1"` | CLI output, skill frontmatter, `.github/workflows/copilot-setup-steps.yml` |
-| IDE | PyCharm (project SDK pinned to the local `.venv`; module type `PYTHON_MODULE`, `external.system.id="pyproject.toml"`) | `.idea/` |
-| VCS | Git, single branch `main`, remote GitHub `dsalazardev/OptiPilot` | `git remote -v`, `git log` |
+| IDE | PyCharm (project SDK pinned to the local `.venv`) | `.idea/` |
+| VCS | Git, branches `main` and `dev`, remote GitHub `dsalazardev/OptiPilot` | `git remote -v`, `git log` |
 | OS/workspace | Windows 11; repo lives inside OneDrive | paths, `.venv` size note |
 
-No build system beyond setuptools defaults; no formatter/linter/test runner configured (see §19).
+No build system beyond setuptools defaults; no formatter/linter configured (see §19).
 
 ---
 
 ## 8. Architecture and Application Flow
 
-**Actual architecture: none beyond the package skeleton.** There is no separation into input/domain/processing/services because there is no application code. `src/models/` and `src/services/` are empty package markers (`__init__.py`, 0 bytes). Do not describe an idealized architecture as if it existed.
+**Actual architecture: a linear stage pipeline, not a layered one.** `src/vision/` is the real package; its modules correspond one-to-one to the stages of Reto 1 and are wired in order by `PipelineVision`. `src/models/` and `src/services/` remain 0-byte package markers and are **not** part of the design.
 
-**Actual application flow: «NOT IMPLEMENTED».** Running `python src/main.py` prints `Hi, PyCharm` — that is the entire executable behavior of the repo.
-
-The only "flow" that exists is the one the challenge *requires* (derived from the 7 specific objectives of Reto 1 — reproduce it only as target behavior, never as current state):
+**Actual application flow: implemented as a validation CLI, not as a robot controller.** The stages run per frame:
 
 ```text
-camera frames ──▶ [line identification / segmentation]        «NOT IMPLEMENTED»
-                      │
-                      ▼
-              [line position relative to robot center]        «NOT IMPLEMENTED»
-                      │
-                      ▼
-              [control actions / trajectory correction]       «NOT IMPLEMENTED»
-                      │
-                      ▼
-   [signal detection: red octagon = PARE / green = SIGA]      «NOT IMPLEMENTED»
-                      │
-                      ▼
-              [stop / resume behavior + recovery]             «NOT IMPLEMENTED»
+frame (video / directory / camera index)
+   │
+   ▼ Preprocesador    Gaussian blur 5×5 → BGR2HSV → crop ROI línea / ROI señales
+   │
+   ▼ Segmentador      inRange HSV (línea, rojo, verde) → open+close → máscaras
+   │
+   ▼ ExtractorCandidatos  findContours → area/aspecto → approxPolyDP (8±1 vértices)
+   │
+   ▼ Confirmador      N=3 consecutive, tolerancia K=2, re-arm tras x_rearme
+   │
+   ▼ MaquinaEstados   SIGA → PERMITIR · PARE → DETENIDO (durante T) → SIGA → reanudar
+   │
+   ├─▶ MetricasCorrida    eventos, decisiones, tiempos → metricas.json
+   └─▶ Visualizador       frames anotados (--diagnostico) → SC-012
 ```
 
-If you implement any stage, record it as an OpenSpec change (propose → apply) so that docs and code stay separated but traceable.
+The robot/actuator boundary is still open: `MaquinaEstados` emits `DecisionMovimiento` **verdicts** (with an explicit `causa`), and nothing yet drives wheels. Treat the following as the target behavior only, never as current state: camera acquisition on the real robot, motor control, and recovery from *descarrilamiento*.
 
 ---
 
@@ -301,12 +316,21 @@ The rubric makes violating this a **"No cumple"** in *Cumplimiento de las restri
 
 | File | Content | Status |
 |------|---------|--------|
-| `src/main.py` | PyCharm sample (`print_hi`), with IDE-specific comments (Ctrl+F8, "Mayús+F10") | Placeholder — replace, don't extend |
-| `src/__init__.py` | empty | package marker |
-| `src/models/__init__.py` | empty | package marker; **no models exist** |
-| `src/services/__init__.py` | empty | package marker; **no services exist** |
+| `src/main.py` | Validation CLI: `argparse` with `--fuente`, `--config`, `--diagnostico`, `--salida`, `--max-fotogramas`, `--anotacion`; wires the pipeline loop, FSM, metrics, visualization; returns exit codes | **Implemented** (T022) |
+| `src/vision/pipeline.py` | `PipelineVision.procesar` — orchestration, degradation, per-stage diagnostics | **Implemented** (T013) |
+| `src/vision/preprocesamiento.py` | `Preprocesador.aplicar` — blur, HSV, ROI crop; degrades on empty frames (FR-014) | **Implemented** (T009) |
+| `src/vision/segmentacion.py` | `Segmentador` — HSV `inRange` masks, open+close, `linea_detectada` | **Implemented** (T010) |
+| `src/vision/candidatos.py` | `ExtractorCandidatos` — `findContours`, area/aspect/vertex filters, `approxPolyDP` | **Implemented** (T011) |
+| `src/vision/deteccion.py` | `Confirmador` — N=3 consecutive, tolerance K=2, re-arm | **Implemented** (T012) |
+| `src/vision/maquina_estados.py` | `MaquinaEstados` — deterministic FSM, `DecisionMovimiento` with explicit `causa` | **Implemented** (T018) |
+| `src/vision/metricas.py` | `MetricasCorrida` — events, decisions, timings, `Referencia` scoring | **Implemented** (T020) |
+| `src/vision/visualizacion.py` | Annotated frames per stage (SC-012) | **Implemented** (T021) |
+| `src/vision/configuracion.py` | `ParametrosConfiguracion`, `RangoHSV`, `RectanguloNormalizado`, load-time validation | **Implemented** (T008) |
+| `src/vision/modelos.py` | Shared dataclasses/enums: `EstadoRobot`, `PermisoMovimiento`, `ClaseSenal`, `EventoDeteccion` | **Implemented** |
+| `src/models/__init__.py` | empty | package marker; **not** an architecture layer |
+| `src/services/__init__.py` | empty | package marker; **not** an architecture layer |
 
-There are no imports between modules, no entry points beyond `python src/main.py`, no CLI, no config loading.
+Entry point: `python -m src.main --fuente <ruta>`.
 
 ---
 
@@ -343,25 +367,34 @@ All four are **class materials authored for Google Colab** (embedded outputs and
 
 ## 15. Configuration
 
-- **`pyproject.toml`** (the only build/config file, verbatim):
+- **`pyproject.toml`** (the only build/config file, verbatim, dependencies + pytest section):
   ```toml
   [project]
   name = "optipilot"
   version = "0.1.0"
   requires-python = ">=3.14"
-  dependencies = []
+  dependencies = ["numpy>=2.4", "opencv-python-headless>=4.13"]
+
+  [dependency-groups]
+  dev = ["pytest>=8"]
+
+  [tool.pytest.ini_options]
+  pythonpath = ["."]
+  testpaths = ["tests"]
+  markers = ["footage: ...", "perf: ..."]
   ```
+- **`config/vision.json`**: the runtime configuration consumed by `configuracion.py` — both ROIs, the HSV ranges for line/red/green, morphology kernel, area minimum, `n_confirmacion`/`k_tolerancia`/`x_rearme`, `t_parada_s`, the latency budget, and the shape filters (`vertices_objetivo`, `tolerancia_vertices`, `aspecto_min`/`aspecto_max`). Loaded and validated on every run; a malformed value raises `ConfiguracionInvalidaError`.
 - **`openspec/config.yaml`**: `schema: spec-driven`; `githubCopilot.cloudAgent: true`. Everything else (context, rules, operations) is **commented-out examples only** — the project has not filled in its OpenSpec context yet. This is the natural place to declare project context for OpenSpec workflows (a change, if done).
 - **`.gitignore`**: Toptal "python" template. Ignores `.venv`, `.env`, `__pycache__/`, `.ipynb_checkpoints`, `.ruff_cache/`, `pyrightconfig.json`, coverage artefacts, etc. `.idea/` is **not** ignored (the line is commented) and IDE files are deliberately tracked, except `.idea/workspace.xml` which is excluded by `.idea/.gitignore`.
-- **No `.env`, no config modules, no settings files, no `uv.lock`.** No environment variables are referenced anywhere (searched `os.environ` / `os.getenv` / dotenv patterns across the repo: zero hits). If a future stage needs env vars, that is a new decision — document it.
+- **No `.env` and no `uv.lock`.** The only environment variable the project reads is `OPTIPILOT_VIDEO_DIR`, and only in the `footage`-marked test (T027); there is no dotenv machinery. If a future stage needs env vars for the product itself, that is a new decision — document it.
 
 ---
 
 ## 16. Development Environment
 
 - Windows 11 machine; the repo sits under OneDrive (`...\OneDrive\Escritorio\ARCHIVOS\DESARROLLO\OptiPilot`). Note two effects: OneDrive may sync large binaries (`.venv` is 234 MB and lives inside the synced folder — it is git-ignored but still synced by OneDrive unless excluded) and path length/encoding quirkiness applies.
-- The venv was created with **uv 0.12.15** using a uv-managed CPython 3.14.7 (see `pyvenv.cfg`). There is **no `pip` module inside `.venv`** — install extra packages with `uv pip install <pkg> --python .venv/Scripts/python.exe` (or recreate managed by uv), and remember the declared-dependencies file (`pyproject.toml`) is currently empty.
-- **Known gap:** `import cv2` fails in `.venv` (OpenCV not installed), so no class notebook and no future CV code can run in the local venv as-is. The notebooks historically ran on Colab (that environment had cv2/sklearn).
+- The venv was created with **uv 0.12.15** using a uv-managed CPython 3.14.7 (see `pyvenv.cfg`). There is **no `pip` module inside `.venv`** — install extra packages with `uv pip install <pkg> --python .venv/Scripts/python.exe` (or recreate managed by uv), and remember there is no `uv.lock` checked in, so the environment is not reproducible from the repo alone.
+- **Resolved gap:** `import cv2` now works — `opencv-python-headless` is declared in `pyproject.toml` and installed. The class notebooks can run locally, except notebook 4's Colab-only `google.colab.files.upload` call (§14).
 - PyCharm is the IDE (`.idea/`): project SDK points at `.venv`; module type derives from `pyproject.toml`.
 
 ---
@@ -370,23 +403,33 @@ All four are **class materials authored for Google Colab** (embedded outputs and
 
 | Purpose | Command | Source of truth |
 |---|---|---|
-| Verify OpenSpec CLI | `openspec --version` | `.github/agents/openspec.agent.md`, `.github/workflows/copilot-setup-steps.yml` |
+| Sync the environment from the manifest | `uv sync` | `pyproject.toml` |
+| Full test suite | `uv run pytest -q` | verified: **167 passed, 5 skipped** |
+| Unit tests only | `uv run pytest tests/unit -q` | verified |
+| Integration tests only | `uv run pytest tests/integration -q` | verified |
+| Run with real footage (opt-in) | `OPTIPILOT_VIDEO_DIR=<dir> uv run pytest -m footage` | `tests/integration/test_footage_linea.py` |
+| Benchmark suite (opt-in) | `uv run pytest -m perf` | `tests/integration/test_rendimiento.py` |
+| Run the validation CLI | `uv run python -m src.main --fuente <ruta>` | `src/main.py` |
+| Write annotated frames | `uv run python -m src.main --fuente <ruta> --diagnostico` | `src/main.py` |
+| Verify OpenSpec CLI | `openspec --version` | `.github/agents/openspec.agent.md` |
 | Install OpenSpec CLI (if missing) | `npm install -g @fission-ai/openspec` | `.github/workflows/copilot-setup-steps.yml` |
 | List changes | `openspec list --json` | generated workflows |
 | Any OpenSpec workflow step | `openspec status --change <name> --json`, `openspec instructions <artifact> --change <name> --json`, `openspec validate …`, `openspec archive …` | `.github/agents/openspec.agent.md` |
-| Run the (sample) entry point | `.venv/Scripts/python.exe src/main.py` | `src/main.py` |
 | Python version check | `.venv/Scripts/python.exe --version` | verified → 3.14.7 |
 
-**There are no build, test, lint, format, or run-the-robot commands in this repository.** Do not invent them; if you add tooling, document it here and in `pyproject.toml` (via a change).
+**There is no build step and no lint/format command.** Do not invent them; if you add tooling, document it here and in `pyproject.toml` (via a change).
 
 ---
 
 ## 18. Testing
 
-- No tests exist: no `test/`, `tests/`, `*_test.py`, `test_*.py`, `conftest.py`, `pytest.ini`, `tox.ini`, or `[tool.pytest]` sections anywhere in the tree.
-- No test framework is declared (no `dependencies`, no extras).
-- The only "validation" available today is `openspec validate` for OpenSpec artifacts — unrelated to product behavior.
-- **«INFERENCE»** Any future implementation of the pipeline will need real footage for evaluation; the only footage resource known is the external Drive folder referenced in `Reto-1.md`.
+- **167 tests pass** (92 unit + 75 integration) plus 5 opt-in skips. Command: `uv run pytest -q`.
+- Layout: `tests/unit/` (6 files, pure logic — no image fixtures), `tests/integration/` (5 files + `_escenarios.py` helper that replays the production loop `PipelineVision → MaquinaEstados`).
+- Shared synthetic frame generator: `tests/fixtures/generador_sintetico.py` (background, vertical line, octagons, gaussian noise). Fixtures were written to draw 640×480 landscape frames, matching the documented target resolution — the real footage in `documents/videos/` is portrait 478×850, so integration tests and footage exercise **different geometries**.
+- Two custom markers in `pyproject.toml`:
+  - `footage` — opt-in real-video validation. Requires `OPTIPILOT_VIDEO_DIR`; **skips cleanly** when unset or when the corpus has no `anotacion_linea.json` (T027). The line-IoU path has therefore been exercised against a synthetic annotated corpus, not yet against real annotation.
+  - `perf` — latency benchmark, non-blocking by default.
+- Notable production bug found by T026 and fixed: `Referencia.cargar` raised `ConfiguracionInvalidaError` with a single argument while the constructor requires `(campo, motivo)`.
 
 ---
 
@@ -447,7 +490,9 @@ The repo ships four synchronized trees of OpenSpec-generated instruction files, 
 | **CRITICAL** | `documents/markdawn/Rubrica-Reto-1.md` (+ `.xlsx`) | How the work is graded; drives explainability and distinctiveness requirements |
 | **CRITICAL** | `documents/markdawn/FundamentosVisionArtificial.md` (+ PDF) | The allowed technique toolbox with worked examples (Canny, morphology, contours, polygons) |
 | **CRITICAL** | `documents/markdawn/18-K-MEANS-Basico.md` (+ PPTX) and `documents/ipynb/*` | K-Means and the color/ops notebooks; review before implementing segmentation stages |
-| **IMPORTANT** | `pyproject.toml` | Single source of declared deps/Python version; currently empty deps |
+| **IMPORTANT** | `pyproject.toml` | Single source of declared deps/Python version and pytest markers |
+| **IMPORTANT** | `config/vision.json` | Runtime parameters (ROIs, HSV ranges, morphology, confirmation, stop time, shape filters) |
+| **IMPORTANT** | `specs/001-cv-sign-detection/**` | Archived change: design, tasks, contracts, checklist, quickstart — the live record of Fases 1–7 |
 | **IMPORTANT** | `openspec/config.yaml` | Workflow schema + Copilot integration; future home of project context/rules |
 | **IMPORTANT** | `openspec/changes/**` | Once work starts: the live plan of every change |
 | **IMPORTANT** | `.gitignore` | Defines what counts as repo vs local (`.venv`, `.env`, caches) |
@@ -460,10 +505,11 @@ The repo ships four synchronized trees of OpenSpec-generated instruction files, 
 
 ## 24. Change Impact Areas
 
-Given the current state (no implementation), the real impact map is about *where change lands*:
+Given the current state (pipeline implemented, actuator boundary open), the real impact map is about *where change lands*:
 
-- Touching **`src/`** → you are creating the first real implementation; it must map every stage to an allowed technique (§10) and stay explainable (§4 criteria 5 & 9); expect it to become the anchor for tests (none exist yet).
-- Adding a **dependency** → update `pyproject.toml [project].dependencies`; note the env is uv-managed and **there is no lockfile**; consider that OpenCV is the obvious eventual addition but it is not declared or installed today.
+- Touching **`src/vision/`** → you are changing the deployed behavior that the 167 tests measure; any edit must map to an allowed technique (§10), stay explainable (§4 criteria 5 & 9), and keep `tests/unit/` + `tests/integration/` green. Changing `roi_linea`, `rango_hsv_linea` or the shape filters alters SC-010 and SC-001/002/003 simultaneously.
+- Touching **`src/vision/configuracion.py`** or **`config/vision.json`** → every test that builds `ParametrosConfiguracion` is affected; validation happens at load time and a malformed value raises.
+- Adding a **dependency** → update `pyproject.toml [project].dependencies`; note the env is uv-managed and **there is no lockfile**; a new dep must be a classical-CV library, never a learned model (§11).
 - Touching **`documents/**`** → you are editing the academic source of truth (originals + transcriptions). Prefer appending corrections; never silently rewrite.
 - Touching **agent trees** → regenerate, don't hand-edit (§22); remember all 4 trees move together.
 - Touching **`openspec/config.yaml`** or the schema → affects every opsx workflow; treat as a change itself.
@@ -500,7 +546,7 @@ Given the current state (no implementation), the real impact map is about *where
 ## 26. Things Agents Must Not Do
 
 - **Never introduce forbidden techniques:** neural networks, deep learning, pretrained models, YOLO/SSD/Faster R-CNN-style detectors, Haar cascades, external AI services, or libraries that auto-detect the line/signals without team-implemented logic. This is a grading criterion, not a style preference.
-- Do not claim or document functionality that does not exist; do not describe the target pipeline (§8) as implemented.
+- Do not claim or document functionality that does not exist; do not describe the target pipeline (§8) as implemented beyond the validation CLI.
 - Do not treat `src/models/` or `src/services/` as implemented architecture; they are empty.
 - Do not treat `documents/**` or the notebooks as product code; do not import from notebooks; do not move them.
 - Do not delete or rewrite academic materials without explicit justification and user approval.
@@ -509,7 +555,7 @@ Given the current state (no implementation), the real impact map is about *where
 - Do not commit secrets, tokens, or `.env` files; none exist today and none should be added.
 - Do not modify `.venv` contents by hand or commit the virtualenv.
 - Do not create an `openspec/` root as a side effect of running commands; do not bypass the opsx workflow for product work.
-- Do not "fix" the `markdawn` folder name or the sample `src/main.py` comments silently for aesthetics — both are known and recorded here.
+- Do not "fix" the `markdawn` folder name silently for aesthetics — it is known and recorded here (§27.7).
 
 ---
 
@@ -517,29 +563,31 @@ Given the current state (no implementation), the real impact map is about *where
 
 Recorded during the audit; each item is factual with evidence:
 
-1. **Documentation vs code:** Reto 1 describes a complete real-time autonomous system; the codebase is a scaffold with a sample script. The gap is total, not partial.
-2. **Empty packages with architectural names:** `src/models/`, `src/services/` exist but contain nothing; the names imply an architecture that has not been designed anywhere.
-3. **Environment vs materials:** the class notebooks require `cv2` (+ `sklearn` in nb4); `.venv` has `sklearn` but **not** `cv2`, and `pyproject.toml` declares no dependencies and there is no lockfile — the local environment cannot run the materials, and is not reproducible from the repo.
-4. **Stored notebook failure:** `4_Kmeans_Imagenes.ipynb`'s last execution crashed with `ModuleNotFoundError: No module named 'google.colab'` (Colab-only import) — the notebook was last run in the wrong environment.
-5. **Broken asset reference:** `documents/markdawn/Reto-1.md` references `media/image1.jpeg` (track photo) but no `media/` directory exists in the repo.
-6. **Undefined stop duration:** PARE = "el tiempo establecido por el docente"; no value is fixed in any document of the repo.
+1. **Documentation vs code:** Reto 1 describes a complete real-time autonomous system; the codebase is a scaffold with a sample script. The gap is total, not partial. **RESOLVED by Fases 3–6**: the pipeline, FSM, metrics, CLI and 167 tests now exist; what remains missing is the actuator boundary and the poster.
+2. **Empty packages with architectural names:** `src/models/`, `src/services/` exist but contain nothing; the names imply an architecture that has not been designed anywhere. **STILL TRUE** — the real code lives in `src/vision/`; the two folders remain 0-byte markers.
+3. **Environment vs materials:** the class notebooks require `cv2` (+ `sklearn` in nb4); `.venv` has `sklearn` but **not** `cv2`, and `pyproject.toml` declares no dependencies and there is no lockfile — the local environment cannot run the materials, and is not reproducible from the repo. **PARTLY RESOLVED**: `opencv-python-headless` is now declared and installed, so the notebooks run; there is still no `uv.lock`.
+4. **Stored notebook failure:** `4_Kmeans_Imagenes.ipynb`'s last execution crashed with `ModuleNotFoundError: No module named 'google.colab'` (Colab-only import) — the notebook was last run in the wrong environment. **STILL TRUE in the file** (historical artifact, not a project blocker).
+5. **Broken asset reference:** `documents/markdawn/Reto-1.md` references `media/image1.jpeg` (track photo) but no `media/` directory exists in the repo. **STILL TRUE**.
+6. **Undefined stop duration:** PARE = "el tiempo establecido por el docente"; no value is fixed in any document of the repo. **STILL TRUE** — `t_parada_s: 3.0` is a provisional default, not a teacher value.
 7. **Generated trees differ across tools:** `.claude/` variants use `/opsx:<name>` colon syntax + extra frontmatter, `.opencode/` adds a `$ARGUMENTS` line; the other two are byte-identical. Intentional per-tool adaptation — but it means "the same file" is not literally the same everywhere.
 8. **Template artefacts in `.gitignore`:** `.ruff_cache/` and `pyrightconfig.json` are mentioned but neither tool is configured; don't assume tooling from the ignore file.
 9. **`.idea/` tracked against template advice:** 7 IDE files are committed while the template suggests ignoring `.idea/`; `workspace.xml` is untracked. If this is not intentional, decide explicitly (a change).
 10. **No README/name definition:** "OptiPilot" appears only in `pyproject.toml`, `.idea/` files, and paths; the repo contains no description of the project beyond the academic documents.
+11. **No signal detection demonstrated on real footage:** the 9 practice videos yield **0 confirmations** (T027 investigation, 2026-09-28). `approxPolyDP` with `EPSILON_APROX=0.03` is *not* the cause — a relaxed-threshold sweep found 305 contours that already satisfy the shape criterion (7-9 vertices, aspect 0.7-1.4), but **304 of 305 lie below `roi_senales`**, i.e. the ROI excludes them. `roi_senales` covers the top 60% of the frame while this footage appears to be shot looking *down* at the track. This is a real calibration gap, but it belongs to the detection stages (Fases 3-5), not to Fase 6-7; do not fix it opportunistically.
+12. **Line mask is not IoU-ready:** `rango_hsv_linea` (`v_max: 110`) lights up ~55-99 % of the line ROI on real footage, and the contract's reference is a ~3 px centre line. The theoretical IoU ceiling is `3/W`, so a mask wider than 5 px **cannot** reach SC-010's 0.60 threshold. Measured 0.125 against a synthetic 3 px reference. Any future SC-010 work must first decide the annotation thickness vs. predicted width.
+13. **Fixture geometry differs from footage:** synthetic frames are 640×480 landscape; the real videos are 478×850 portrait. Integration tests therefore do not exercise the geometry they will be judged on.
 
 ---
 
 ## 28. Known Limitations / Undetermined Items
 
-- No implementation of any challenge capability (see §5).
-- No tests, no CI for the product, no lint/format tooling.
-- No `README`, `LICENSE`, `CONTRIBUTING`.
 - No robot/hardware documentation: actuator interface, camera access (OpenCV `VideoCapture` index, ROS, serial, etc.) — all undetermined; do not assume.
 - No specification of the track, sign placement/size, lighting conditions — only the external practice-videos link.
 - PARE stop duration and "intentos" (attempts) count are teacher-defined and absent here.
-- Dependencies: none declared, none locked; OpenCV (needed for the materials and the challenge) is not installed.
+- The annotated reference corpus (SC-010) does not exist, so SC-001/002/003/010 are **not evaluable**; T027 skips cleanly rather than reporting a number.
+- The camera mounting/orientation on the real robot is unknown, and the practice footage is portrait/downward-looking, which does not match the ROI geometry in `config/vision.json`.
 - Environment: OneDrive-hosted repo; `.venv` is large (234 MB) and synced by OneDrive despite being git-ignored.
+- No product CI, no lint/format tooling, no `README`/`LICENSE`/`CONTRIBUTING`, no `uv.lock`.
 
 ---
 
@@ -571,7 +619,7 @@ Before modifying anything, verify:
 - [ ] The work fits an OpenSpec change (or I confirmed with the user why it doesn't need one), and I know where the change's artifacts live.
 - [ ] I know which files I will touch and none of them are: academic originals without justification, generated agent files (hand-edit), vacated/empty placeholder semantics I plan to change silently.
 - [ ] New dependencies (if any) will be declared in `pyproject.toml` and installed via uv; no secrets involved.
-- [ ] I know how I will validate the result (today: manual/interactive; no test infrastructure exists — state this honestly).
+- [ ] I know how I will validate the result (today: `uv run pytest -q`, plus the CLI on real footage; the `footage` and `perf` markers cover the rest).
 - [ ] Impact checked: does this change the story told in the poster/rubric criteria (explainability, differentiation, results)? If yes, note it.
 
 ---

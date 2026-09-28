@@ -90,10 +90,17 @@ Principio IV). Los esquemas de serialización se detallan en `contracts/`.
 - `DETENIDO_MINIMO` (T en curso)
 - `DETENIDO_ESPERANDO_SIGA` (T cumplido, sin SIGA armado)
 
-### 8. DecisionMovimiento (enum) — FR-015
+### 8. DecisionMovimiento (value object) — FR-015
 
-- `AUTORIZADO` / `NO_AUTORIZADO` + `causa: str` (p. ej., `PARE_CONFIRMADO`, `T_CUMPLIDO_CON_SIGA`,
-  `SIGA_CONFIRMADO`, `INICIO`).
+Es un `dataclass(frozen=True)`, **no un enum**: el veredicto es un enum y la causa es un `str` que
+cambia en cada emisión, por lo que un enum no puede representar la pareja.
+
+| Campo | Tipo | Notas |
+|-------|------|-------|
+| `veredicto` | PermisoMovimiento | enum: `AUTORIZADO` \| `NO_AUTORIZADO` |
+| `causa` | str | p. ej. `PARE_DETENIDO`, `T_CUMPLIDO_CON_SIGA`, `SIGA_CONFIRMADO`, `ESPERANDO_SIGA`, `INICIO` |
+
+Implementación: `src/vision/modelos.py` (clase `DecisionMovimiento`, decisión `e18c395`).
 
 ### 9. TransicionEstado — FR-023
 
@@ -107,7 +114,7 @@ Principio IV). Los esquemas de serialización se detallan en `contracts/`.
 
 | Campo | Tipo | Notas |
 |-------|------|-------|
-| `tipo` | PARE_CONFIRMADO \| SIGA_CONFIRMADO \| SENAL_PERDIDA \| PARE_REARMADO \| FALSO_POSITIVO_SUPRIMIDO | |
+| `tipo` | PARE_CONFIRMADO \| SIGA_CONFIRMADO \| SENAL_PERDIDA \| PARE_REARMADO \| FALSO_POSITIVO_SUPRIMIDO (reservado, no emitido en v1) | |
 | `clase` | PARE \| SIGA \| None | |
 | `fotograma_idx`, `t_s` | int / float | |
 | `centro_px` | (int, int) \| None | |
@@ -115,12 +122,26 @@ Principio IV). Los esquemas de serialización se detallan en `contracts/`.
 
 ### 11. EstadoMaquina (runtime, determinista)
 
+La FSM es **sin memoria de detección**: no guarda identificadores de ocurrencia. Consume
+`EventoSenal` por fotograma y deriva su estado de ellos (`MaquinaEstados._confirmado`).
+
 | Campo | Tipo | Notas |
 |-------|------|-------|
 | `estado` | EstadoRobot | |
 | `t_inicio_parada` | float \| None | cronómetro T |
 | `siga_armado` | bool | se conserva aunque la señal salga de vista (FR-022) |
-| `pare_activa_id` | int \| None | ocurrencia latcheada (FR-021) |
+| `decision` | DecisionMovimiento | ver §8 |
+| `fotograma_idx` | int | contador de fotogramas procesados |
+
+**Dónde vive el latch de la ocurrencia (FR-021).** No en la FSM, sino en el detector:
+
+| Ubicación | Campo | Papel |
+|-----------|-------|-------|
+| `Detector.ocurrencias` | `list[Ocurrencia]` | ocurrencias activas y cerradas, en orden de creación |
+| `_RastreoSenal.ocurrencia_id` | int \| None | puntero por clase a la ocurrencia activa en curso |
+
+`Ocurrencia` (`id`, `clase`, `fotograma_inicio`, `estado`, `detecciones`, `anotada`, …) es la
+unidad que el contrato de métricas ya usa como denominador de las tasas (Q3, FR-025).
 
 ### 12. ResultadoProcesamiento (salida del pipeline por fotograma)
 

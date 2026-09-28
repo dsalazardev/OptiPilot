@@ -26,12 +26,20 @@ Una línea por evento, en orden temporal:
 |-------|------|-------|
 | `ts` | float | segundos desde el inicio de la corrida |
 | `frame` | int | índice de fotograma |
-| `tipo` | enum | `PARE_CONFIRMADO`, `SIGA_CONFIRMADO`, `SENAL_PERDIDA`, `PARE_REARMADO`, `FALSO_POSITIVO_SUPRIMIDO`, `TRANSICION` |
+| `tipo` | enum | `PARE_CONFIRMADO`, `SIGA_CONFIRMADO`, `SENAL_PERDIDA`, `PARE_REARMADO`, `TRANSICION`; `FALSO_POSITIVO_SUPRIMIDO` está reservado y no se emite en v1 (ver nota) |
 | `clase` | "PARE" \| "SIGA" \| null | según el tipo |
 | `ocurrencia_id` | int \| null | identifica la ocurrencia (delimitada por re-armado) |
 | `centro` | [x, y] \| null | píxeles |
 | `origen`, `destino` | EstadoRobot \| null | presentes solo en `TRANSICION` |
 | `causa` | CausaTransicion \| null | presente solo en `TRANSICION` |
+
+> **`FALSO_POSITIVO_SUPRIMIDO` está reservado y no se emite en v1.** El valor del enum existe
+> (`src/vision/modelos.py`) pero ningún código lo construye. No es un olvido: la supresión de falsos
+> positivos **ocurre por silencio**. Un candidato que no alcanza los N fotogramas consecutivos de
+> confirmación (ni la tolerancia K) simplemente nunca genera un `EventoSenal` — no hay evento que
+> emitir. Emitirlo exigiría añadir instrumentación al `Detector` para reportar candidatos descartados,
+> lo que es una mejora de diagnóstico y queda fuera del alcance actual. Si se adopta, el evento
+> llevará `clase` y `ocurrencia_id` del candidato descartado.
 
 ## `metricas.json`
 

@@ -112,13 +112,61 @@ fotogramas anotados con contadores coherentes; el resumen nunca omite claves.
 **Independent Test**: la suite `uv run pytest -q` pasa completa en entorno headless sin cámara; los
 marcadores `footage` y `perf` se ejecutan por separado y no bloquean.
 
-- [ ] T024 [US1] Test de integración del pipeline en `tests/integration/test_pipeline_fotogramas.py`: secuencia sintética completa (línea + PARE + SIGA) encadenando `PipelineVision` → `MaquinaEstados` → `MetricasCorrida`; verifica detecciones, decisiones y resumen (depende de T013, T018, T020)
-- [ ] T025 [P] [US2] Test de integración de escenarios de estado en `tests/integration/test_escenarios_estado.py`: co-visible, SIGA antes de T, PARE nuevo durante la detención y pérdida ≤ K sobre secuencias end-to-end (depende de T018)
-- [ ] T026 [P] [US4] Test de la corrida demo en `tests/integration/test_corrida_demo.py`: genera un video sintético temporal, ejecuta el CLI por `subprocess` y verifica artefactos (`eventos.jsonl`, `metricas.json`, frames) y código de salida 0 (depende de T022)
-- [ ] T027 [P] [US3] Test de línea con footage real en `tests/integration/test_footage_linea.py`: marcado `footage`, opt-in por `OPTIPILOT_VIDEO_DIR`; verifica la máscara de línea y el reporte «no detectado»; exige IoU promedio ≥ 0.60 solo si hay anotación y hace skip limpio si no hay footage (depende de T010, T007)
-- [ ] T028 [P] Benchmark de latencia en `tests/integration/test_rendimiento.py`: marcado `perf`; mediana ≤ 33 ms por fotograma 640×480 sintético en 100 fotogramas; no bloqueante por defecto (depende de T013)
+- [x] T031 Definir el contrato de anotación de referencia en `specs/001-cv-sign-detection/contracts/anotacion-referencia.md`: formato de máscara de línea (PNG binario + manifiesto JSON), procedimiento, tamaño del subconjunto y regla de cálculo del IoU, más el formato de señales y el tamaño del corpus para SC-001/002. **Desbloquea T027** (depende de CHK024, CHK031)
+
+- [X] T024 [US1] Test de integración del pipeline en `tests/integration/test_pipeline_fotogramas.py`: secuencia sintética completa (línea + PARE + SIGA) encadenando `PipelineVision` → `MaquinaEstados` → `MetricasCorrida`; verifica detecciones, decisiones y resumen (depende de T013, T018, T020)
+- [X] T025 [P] [US2] Test de integración de escenarios de estado en `tests/integration/test_escenarios_estado.py`: co-visible, SIGA antes de T, PARE nuevo durante la detención y pérdida ≤ K sobre secuencias end-to-end (depende de T018)
+- [X] T026 [P] [US4] Test de la corrida demo en `tests/integration/test_corrida_demo.py`: genera un video sintético temporal, ejecuta el CLI por `subprocess` y verifica artefactos (`eventos.jsonl`, `metricas.json`, frames) y código de salida 0 (depende de T022)
+- [X] T027 [P] [US3] Test de línea con footage real en `tests/integration/test_footage_linea.py`: marcado `footage`, opt-in por `OPTIPILOT_VIDEO_DIR`; verifica la máscara de línea y el reporte «no detectado»; exige IoU promedio ≥ 0.60 según el contrato de anotación, y hace skip limpio si no hay footage (depende de T010, T007, **T031**)
+
+**Resultado de T027 (2026-09-28)**: 5 tests marcados `footage`. Sin la variable, los 5 hacen
+skip limpio; con `OPTIPILOT_VIDEO_DIR` apuntando a los 9 videos reales, **2 pasan y 3 hacen skip**
+porque ningún video trae `anotacion_linea.json` y, sin anotación manual, no hay IoU evaluable. El
+skip es el comportamiento correcto: preferible a reportar un número inventado. Implementado:
+carga y validación del manifiesto contra §2.1 del contrato (formato, resolución, método, binaridad
+estricta, rechazo de máscara vacía), cálculo de IoU recortado a la ROI común (§2.5), reporte de
+mediana/mínimo/desviación/desglose por video (§2.4) y verificación del tamaño mínimo del corpus (§2.3).
+
+**Desviación registrada en T027**: el enunciado pedía «IoU promedio ≥ 0.60»; el test **falla** si
+no se alcanza, pero hoy no puede ejecutarse porque el corpus anotado no existe. La maquinaria se
+verificó contra un corpus sintético anotado: rechaza anotaciones malformadas (formato,
+resolución, método vacío, máscara no binaria, máscara vacía) y calcula el IoU correctamente.
+
+**Hallazgo de calibración registrado en T027**: contra una referencia sintética de 3 px el IoU
+medido es **0.125**, exactamente `3/24`: la máscara actual predice la línea con 24 px de grosor
+mientras la referencia del contrato son 3 px. El techo del IoU es `3/W`, luego **ninguna máscara
+de 6 px o más puede alcanzar 0.60**. La polaridad y el grosor de la predicción deben decidirse
+antes de que SC-010 sea evaluable; se documenta en `AGENTS.md` §27.12 y no se corrige aquí
+porque pertenece a las etapas de segmentación (Fases 3–5).
+- [X] T028 [P] Benchmark de latencia en `tests/integration/test_rendimiento.py`: marcado `perf`; mediana ≤ 33 ms por fotograma 640×480 sintético en 100 fotogramas; no bloqueante por defecto (depende de T013)
 
 **Checkpoint**: Sistema completo verificado de extremo a extremo
+
+**Nota de orden (2026-09-28)**: T031 se creó durante la revisión del checklist para romper un ciclo
+de dependencia detectado: T027 exigía un IoU contra una anotación cuyo formato no existía, mientras
+que T030 —que debe *definir* ese formato— dependía de T027. T031 se ejecuta **antes** de T027, de
+modo que el IoU ≥ 0.60 sea verificable de verdad. Sin T031, T027 cerraría con skip y SC-010, SC-001
+y SC-002 quedarían documentados pero nunca medidos.
+
+**Resultado de la fase (2026-09-28)**: `167 passed, 5 skipped` (92 unitarios previos + 75 de
+integración; los 5 skipped son los del marcador `footage`, opt-in). Reparto: T024 13, T025 15,
+T026 33, T027 5, T028 14. T027 cierra su parte automatizada: la infraestructura de evaluación de
+la línea queda operativa y verificada, pero el IoU requiere el corpus anotado, que es trabajo
+humano pendiente.
+
+**Desviación registrada en T026**: el enunciado pedía «generar un video sintético temporal» y se
+ejecutó con un **directorio de imágenes** como fuente (`--fuente`), que es la otra vía del mismo
+contrato `_iterar_fotogramas`. Motivo: `cv2.VideoWriter` es justamente el punto abierto de CHK040
+(`opencv-python>=4.13` resolvió a 5.0.0.93, cuyo códec en contenedor es distinto al esperado) y no
+conviene que la suite dependa de él. La corrida por `subprocess` sí se ejecuta
+(`test_python_m_src_main_termina_con_codigo_ok`), cubriendo el requisito del enunciado. Si más
+adelante se confirma un códec estable, se puede añadir un caso que exercite la fuente de video.
+
+**Hallazgo de producción corregido en T026**: `Referencia.cargar` lanzaba
+`ConfiguracionInvalidaError` con un solo argumento, pero su constructor exige `(campo, motivo)`
+(`src/vision/configuracion.py:29`). Cualquier `--anotacion` inválida —JSON roto u objeto en vez de
+lista— provocaba `TypeError` con traza en vez de devolver el código de salida 2 del contrato.
+Corregido en `src/main.py` (`Referencia.cargar`); hay dos tests que lo cubren.
 
 ---
 
@@ -126,8 +174,28 @@ marcadores `footage` y `perf` se ejecutan por separado y no bloquean.
 
 **Purpose**: Documentación, protocolo de evaluación y validación final
 
-- [ ] T029 [P] Actualizar `AGENTS.md`: comandos verificados (`uv sync`, `uv run pytest`, CLI), dependencias nuevas (`opencv-python-headless`, `pytest`), estado del proyecto y límites vigentes (depende de T003, T022)
-- [ ] T030 Actualizar `specs/001-cv-sign-detection/quickstart.md` con el protocolo de evaluación (tamaño y criterio de anotación para SC-001/002/010, registro de intervenciones para SC-011 y criterio de ajuste si la latencia excede el presupuesto) y validar los comandos de extremo a extremo registrando los resultados observados (depende de T024, T026, T027)
+- [X] T029 [P] Actualizar `AGENTS.md`: comandos verificados (`uv sync`, `uv run pytest`, CLI), dependencias nuevas (`opencv-python-headless`, `pytest`), estado del proyecto y límites vigentes (depende de T003, T022)
+- [X] T030 Actualizar `specs/001-cv-sign-detection/quickstart.md` con el protocolo de evaluación (referencia a `contracts/anotacion-referencia.md` ya definido en T031, tabular SC-001…SC-012 por entorno de validación, registro de intervenciones para SC-011 y criterio de ajuste si la latencia excede el presupuesto) y validar los comandos de extremo a extremo registrando los resultados observados (depende de T024, T026, T027, **T031**)
+
+**Resultado de T029 (2026-09-28)**: §1, §5, §6, §7, §8, §12, §15, §16–§19, §23, §24, §26, §27 y
+§28 reescritos. El documento ya no afirma «no implementado» donde hay código: el pipeline, la FSM,
+las métricas, el CLI y los 167 tests constan como implementados, y los límites (capa de actuadores,
+corpus anotado, duración de T, póster) como lo que falta.
+
+**Resultado de T030 (2026-09-28)**: protocolo de evaluación con tres entornos (SINT, PERF, FOOT),
+tabla SC-001…SC-012 con veredicto por entorno, registro de intervenciones para SC-011, y criterio de
+ajuste de latencia en cuatro pasos ordenados. Comandos validados de extremo a extremo con los valores
+observados: suite `167 passed, 5 skipped`; `perf` `14 passed, 158 deselected`; `footage` `2 passed,
+3 skipped`; CLI sobre los 9 videos con p95 de 2.98–3.88 ms/fotograma.
+
+**Aclaración registrada en T030**: `fps promedio = 25.13` reportado por el CLI **no** mide el
+rendimiento del pipeline —es `fotogramas / t_último`, con `t_último` nominal según el FPS declarado
+del video—. El coste real es `latencia proc.`, medida con reloj. Documentado para que el número no
+se lea como una limitación en el póster.
+
+**Lectura de conjunto**: tras T029 y T030, las Fases 6 y 7 quedan cerradas. SC-001/002/003/010 no
+son evaluables porque el corpus anotado no existe y las ROIs no están calibradas para la geometría
+del footage; ambos hechos quedan registrados como tales en lugar de reportarse como 0.
 
 ---
 

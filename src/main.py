@@ -173,9 +173,11 @@ class Referencia:
         try:
             datos = json.loads(ruta.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as error:
-            raise ConfiguracionInvalidaError(f"anotacion: {error}") from error
+            raise ConfiguracionInvalidaError("anotacion", str(error)) from error
         if not isinstance(datos, list):
-            raise ConfiguracionInvalidaError("anotacion: se esperaba una lista de tramos")
+            raise ConfiguracionInvalidaError(
+                "anotacion", "se esperaba una lista de tramos"
+            )
         return cls(datos)
 
     @property

@@ -118,32 +118,32 @@ inyectando secuencias sintéticas de `error_norm`, sin cámara.
 
 ### Tests for User Story 2 ⚠️ (escribir primero)
 
-- [ ] T016 [P] [US2] Tests de la tabla de decisión en `tests/unit/test_control_trayectoria.py`:
+- [X] T016 [P] [US2] Tests de la tabla de decisión en `tests/unit/test_control_trayectoria.py`:
       |error| dentro de zona muerta ⟹ `AVANZAR`; error fuera ⟹ lado correcto según el signo;
       borde de la zona muerta con pertenencia inclusiva por dentro / exclusiva por fuera
-- [ ] T017 [P] [US2] Test de **histéresis**: 50 fotogramas con error alternando entre 0.09 y 0.11
+- [X] T017 [P] [US2] Test de **histéresis**: 50 fotogramas con error alternando entre 0.09 y 0.11
       (banda entre `zona_muerta − h` y `zona_muerta + h`) deben producir **cero** cambios de
       comando. Este test es el que falla si se implementa sin histéresis
-- [ ] T018 [P] [US2] Test de **sostenimiento**: error grande y constante durante N fotogramas ⟹ un
+- [X] T018 [P] [US2] Test de **sostenimiento**: error grande y constante durante N fotogramas ⟹ un
       único comando de corrección, sin alternancia entre lados (FR-015)
-- [ ] T019 [P] [US2] Test de **fallo seguro**: `decidir` nunca devuelve `None` y nunca propaga
+- [X] T019 [P] [US2] Test de **fallo seguro**: `decidir` nunca devuelve `None` y nunca propaga
       excepción; un estado inconsistente ⟹ `DETENER` con causa `FALLO_SEGURO` (FR-025, Q8/Q9)
-- [ ] T020 [P] [US2] Tests de **recuperación** (US3, mismo módulo): pérdida de N fotogramas ⟹ busca
+- [X] T020 [P] [US2] Tests de **recuperación** (US3, mismo módulo): pérdida de N fotogramas ⟹ busca
       hacia el último lado con causa `RECUPERACION` en los N; pérdida en el N+1 ⟹ `DETENER` con
       `GRACIA_AGOTADA`; reaparición ⟹ mando normal y memoria actualizada; sin memoria previa ⟹
       `DETENER` inmediato; reaparición en lado opuesto ⟹ invierte en el siguiente fotograma
 
 ### Implementation for User Story 2
 
-- [ ] T021 [US2] Crear `src/vision/control_trayectoria.py` con `ControlTrayectoria.decidir(pos)`:
+- [X] T021 [US2] Crear `src/vision/control_trayectoria.py` con `ControlTrayectoria.decidir(pos)`:
       implementar los dos umbrales de la histéresis (salida a corrección si
       `|e| >= zona_muerta + histeresis`; retorno a `AVANZAR` si `|e| <= zona_muerta − histeresis`;
       en la banda intermedia, mantener el comando anterior) — técnica autorizada: comparación de
       umbral con histéresis
-- [ ] T022 [US2] Implementar la memoria del último lado en `ControlTrayectoria`: actualizar `LadoConocido`
+- [X] T022 [US2] Implementar la memoria del último lado en `ControlTrayectoria`: actualizar `LadoConocido`
       en cada fotograma válido (reiniciando `fotogramas_perdidos`), incrementarlo en cada fotograma
       inválido sin descartar la memoria, y vaciarla en `reiniciar()` (FR-018–FR-023, Q10/Q11/Q13)
-- [ ] T023 [US2] Implementar `reiniciar()` para que la memoria no sobreviva entre corridas (FR-023)
+- [X] T023 [US2] Implementar `reiniciar()` para que la memoria no sobreviva entre corridas (FR-023)
 
 **Checkpoint**: US2 y US3 verificables juntas (comparten módulo). El control ya produce comandos
 correctos sobre secuencias sintéticas.

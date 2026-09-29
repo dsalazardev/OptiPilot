@@ -15,7 +15,8 @@ son opcionales en este cambio.
 **Organization**: Tareas agrupadas por historia de usuario, para permitir implementación y prueba
 independientes. Cada historia tiene su propio checkpoint.
 
-**Input del equipo (decisiones tomadas 2026-09-28)**: Bluetooth Classic SPP con `pyserial`; Spec Kit
+**Input del equipo (decisiones tomadas 2026-09-28)**: Bluetooth Classic SPP por socket RFCOMM de la
+biblioteca estándar, con **un byte ASCII por comando** y **cero dependencias de terceros**; Spec Kit
 en vez de OpenSpec; `t_parada_s` intacto; transporte en `src/transporte/`; recuperación por memoria
 del último lado con `n_gracia_busqueda`; `x_objetivo` configurable; riesgo de convención de giro
 declarado.
@@ -32,6 +33,12 @@ declarado.
 - [X] T001 Crear `src/transporte/` con `__init__.py` (paquete nuevo, fuera de `src/vision/`)
 - [X] T002 Declarar `pyserial` en `dependencies` de `pyproject.toml` y ejecutar `uv sync` para
       actualizar `uv.lock` (Principio III: declarar antes de importar)
+      > **⚠️ SUPERADA (2026-09-28) — no la desmarcar.** El profesor confirmó el protocolo real: un
+      > byte ASCII por comando sobre un socket RFCOMM de la biblioteca estándar. `pyserial` no tenía
+      > uso, así que **se retiró** de `pyproject.toml` y de `uv.lock` en vez de declararse. La tarea
+      > queda como registro histórico: el principio que la justificaba (declarar antes de importar,
+      > Principio III) sigue vigente, pero hoy **no hay nada que declarar** porque el transporte usa
+      > solo `socket`. Ver `research.md` Decisión 7 y `contracts/transporte-bluetooth.md` §1.
 - [X] T003 [P] Verificar que la suite de 001 sigue verde antes de tocar nada:
       `uv run pytest -q` (baseline: 167 passed, 5 skipped)
 
@@ -50,15 +57,16 @@ cuatro dependen de las entidades y los parámetros nuevos.
       (frozen, con las invariantes de data-model §2) — **sin modificar** las entidades existentes
 - [X] T005 [FOUND] Añadir a `modelos.py`: `LadoConocido` (frozen), `DecisionControl` (frozen) y
       `DecisionCompuesta` (frozen, con la invariante `VETO_FSM ⟹ DETENER`)
-- [X] T006 [FOUND] Añadir a `src/vision/configuracion.py` los 10 parámetros de control con sus
+- [X] T006 [FOUND] Añadir a `src/vision/configuracion.py` los 9 parámetros de control con sus
       defaults (`x_objetivo` 0.5, `frac_anticipacion` 0.40, `frac_pico` 0.50,
       `umbral_confianza` 0.35, `zona_muerta` 0.10, `histeresis` 0.03, `n_gracia_busqueda` 5,
-      `puerto_serial` null, `baudrate` 9600, `timeout_serial_s` 0.20) leyendo de
+      `mac_bluetooth` `00:1B:10:21:2C:1B`, `timeout_transporte_s` 0.20) leyendo de
       `config/vision.json` (no un archivo nuevo — ver contrato §1)
 - [X] T007 [FOUND] Implementar en `configuracion.py` las 6 reglas de validación cruzada V1–V6
       (contracts/esquema-configuracion.md §4), lanzando `ConfiguracionInvalidaError(campo, motivo)`
-- [X] T008 [FOUND] [P] Escribir `tests/unit/test_configuracion.py` para los 10 parámetros: rango
-      válido, default, y cada regla V1–V6 rechazando con el campo correcto
+- [X] T008 [FOUND] [P] Escribir `tests/unit/test_configuracion.py` para los 9 parámetros: rango
+      válido, default, y cada regla V1–V6 rechazando con el campo correcto (V5 = formato de MAC,
+      V6 = timeout positivo)
 - [X] T009 [FOUND] Crear `src/transporte/base.py` con el `Protocol Transporte` (sin I/O:
       `enviar`/`cerrar`/`conectado`/`ultimo_error`)
 
@@ -156,11 +164,11 @@ correctos sobre secuencias sintéticas.
 > comparte módulo. **Esta fase es el compositor**, que la spec exige como punto de arbitraje y que
 > no se había asignado a ninguna historia: sin él, un PARE puede ser pisado por una corrección.
 
-- [ ] T024 [P] [US2] Tests del compositor en `tests/unit/test_compositor.py`: con
+- [X] T024 [P] [US2] Tests del compositor en `tests/unit/test_compositor.py`: con
       `DecisionMovimiento(NO_AUTORIZADO)` el comando final es `DETENER` en el 100 % de los casos
       (SC-007); con `AUTORIZADO` el comando final es el propuesto por el control; la causa del veto
       es `VETO_FSM`; `DecisionMovimiento` de 001 no cambia (FR-026)
-- [ ] T025 [US2] Crear `src/vision/compositor.py` con la precedencia de tres niveles de
+- [X] T025 [US2] Crear `src/vision/compositor.py` con la precedencia de tres niveles de
       `api-control.md` §3: (1) veto por FSM ⟹ `DETENER`; (2) el control propone `DETENER` ⟹
       `DETENER`; (3) en otro caso ⟹ el comando propuesto. Registrar siempre la causa (FR-027)
 
@@ -171,19 +179,41 @@ independientemente de lo que proponga el control.
 
 ## Phase 6: User Story 4 — Transporte Bluetooth Classic SPP (Priority: P2)
 
-- [ ] T026 [P] [US4] Tests del protocolo en `tests/unit/test_transporte.py`: los 4 comandos
-      serializan exactamente a las tramas de `mapa-comandos.md` §1 (`A5 01 00 A4`, `A5 02 00 A7`,
-      `A5 03 00 A6`, `A5 04 00 A1`); checksum XOR correcto; `enviar` no lanza con puerto inexistente;
-      `cerrar` es idempotente; `conectado` y `ultimo_error` consultables sin excepción
+> **Estado real (2026-09-28).** El cambio de protocolo (byte único sobre RFCOMM, ver
+> `research.md` Decisión 7) **ya está implementado** en `src/transporte/spp.py`, y
+> `tests/unit/test_transporte.py` tiene 21 pruebas que pasan; T026 y T029 quedan marcadas `[X]`
+> por ese motivo. `src/vision/compositor.py` y sus 89 pruebas (T024, T025) también están hechos.
+> La **suite completa aún no se ha re-ejecutado** desde estas adaptaciones: el último dato global
+> es 270 passed / 5 skipped, anterior a ellas. `ColaTransporte` y `TransporteSimulado`
+> (T027, T028, T030) siguen **sin implementar**.
+
+- [X] T026 [P] [US4] Tests del protocolo en `tests/unit/test_transporte.py`:
+  - **Byte único**: los 4 comandos viajan como **un byte ASCII** cada uno —`AVANZAR` = `b"w"`,
+    `IZQUIERDA` = `b"a"`, `DERECHA` = `b"d"`, `DETENER` = `b"x"`—, los cuatro son distintos, y
+    `sendall` recibe **exactamente 1 byte por comando** (sin sufijo, sin cabecera, sin checksum)
+  - **Enlace**: la conexión usa la familia y el protocolo de Bluetooth Classic, va al **canal
+    RFCOMM 1** de la `mac_bluetooth` recibida, y el timeout del socket es `timeout_transporte_s`
+  - **Conexión perezosa**: no se abre socket en el constructor; se abre en el primer `enviar` y se
+    reutiliza después
+  - **Fallo sin hardware**: `enviar` no lanza ni con una MAC inalcanzable ni en una plataforma sin
+    `AF_BLUETOOTH`; registra `ultimo_error`, devuelve `False`; `cerrar` es idempotente; `conectado` y
+    `ultimo_error` son consultables sin excepción
+  - **MAC configurable**: dos MAC distintas producen dos destinos distintos
+  - Norma: ningún módulo del proyecto importa `serial`
 - [ ] T027 [P] [US4] Tests de `ColaTransporte` en `tests/unit/test_cola_transporte.py`: `encolar`
       deduplica comandos idénticos consecutivos; FIFO en `drenar`; un fallo de envío deja el comando
       pendiente y registra `ultimo_error`; la reconexión reanuda sin duplicar; `pendientes()` refleja
       el backlog
 - [ ] T028 [US4] Crear `src/transporte/simulado.py` con `TransporteSimulado`: registra el historial,
       permite inyectar fallos (`fallar_con(n)`) para probar reconexión (T18 del contrato)
-- [ ] T029 [US4] Crear `src/transporte/spp.py` con `TransporteSPP` — **el único archivo del proyecto
-      que importa `serial`** — con `timeout_serial_s` acotado, captura de fallos de apertura,
-      `cerrar` idempotente y reintento best-effort de reapertura
+- [X] T029 [US4] Crear `src/transporte/spp.py` con `TransporteSPP` — **el único archivo del
+      proyecto que abre un socket** — con el protocolo de **un byte ASCII por comando** (`w`, `a`,
+      `d`, `x`) y una función pura `serializar(comando) -> bytes`; enlace RFCOMM con
+      `socket.AF_BLUETOOTH` + `SOCK_STREAM` + `socket.BTPROTO_RFCOMM` contra el **canal 1** de
+      `mac_bluetooth`; escritura con `sendall()`; `timeout_transporte_s` acotado; **conexión perezosa**
+      (se abre en el primer `enviar`, nunca en `__init__`); **fábrica de sockets inyectable** para que
+      la suite corra sin hardware; captura de fallos de apertura; `cerrar` idempotente y reintento
+      best-effort de reapertura. **Ninguna dependencia de terceros**
 - [ ] T030 [US4] Crear `src/transporte/cola.py` con `ColaTransporte`: `encolar` O(1) sin I/O
       (FR-031), deduplicación (FR-032), `drenar` FIFO con reintento de pendientes, y la garantía de
       que el bucle de visión **nunca** la invoca
@@ -243,19 +273,21 @@ reales sin embellecerlos (Principio V).
 
 ## Phase 9: Documentación y cierre (Principio VI)
 
-- [ ] T043 [P] Actualizar `AGENTS.md`: estado real del cambio (nuevo paquete `src/transporte/`,
-      módulos nuevos, `pyserial` en dependencias, comandos verificados), y §27 con los vacíos
-      abiertos: convención de giro pendiente de pista, `x_objetivo`/`zona_muerta` provisionales,
-      y las 4 preguntas P1–P4 del receptor Bluetooth
-- [ ] T044 [P] Marcar **CHK035 como cerrada** en `specs/001-cv-sign-detection/checklists/plan-tecnico.md`
+- [X] T043 [P] Actualizar `AGENTS.md`: estado real del cambio (nuevo paquete `src/transporte/`,
+      módulos nuevos, el transporte **sin dependencias de terceros** y su enlace RFCOMM de un byte,
+      comandos verificados), y §27 con los vacíos abiertos: convención de giro pendiente de pista,
+      `x_objetivo`/`zona_muerta` provisionales, la MAC del mBot sin confirmar, el supuesto de un byte
+      sin salto de línea, y las 5 preguntas P1–P5 del receptor Bluetooth
+- [X] T044 [P] Marcar **CHK035 como cerrada** en `specs/001-cv-sign-detection/checklists/plan-tecnico.md`
       con referencia a `specs/002-control-trayectoria/`
-- [ ] T045 [P] Registrar en `AGENTS.md` §27 la inconsistencia detectada: `data-model.md` de 001
+- [X] T045 [P] Registrar en `AGENTS.md` §27 la inconsistencia detectada: `data-model.md` de 001
       documenta `roi_linea.y = 0.55`, obsoleto desde la recalibración a `0.10` (commit `7f0990c`).
       **No** editar 001 en este cambio: registrar el conflicto, como exige el Principio VI
-- [ ] T046 Ejecutar la verificación completa de `quickstart.md` §2–§5 y registrar los números
+- [X] T046 Ejecutar la verificación completa de `quickstart.md` §2–§5 y registrar los números
       reales obtenidos en este cambio (sin dejar placeholders)
-- [ ] T047 [P] Revisar cumplimiento constitucional: confirmar que `import serial` aparece
-      **únicamente** en `src/transporte/spp.py`, y que no hay Hough ni `fitLine` en ningún módulo
+- [X] T047 [P] Revisar cumplimiento constitucional: confirmar que el enlace se abre **únicamente** en
+      `src/transporte/spp.py` y que ningún módulo del proyecto importa `serial`, y que no hay Hough
+      ni `fitLine` en ningún módulo
 
 **Checkpoint**: el cambio está completo, documentado y auditable contra la Constitución.
 

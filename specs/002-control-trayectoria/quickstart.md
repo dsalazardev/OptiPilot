@@ -2,16 +2,27 @@
 
 **Feature**: `specs/002-control-trayectoria` | **Fecha**: 2026-09-28
 
-> **Estado: la implementación aún no existe.** Este documento describe cómo se verificará cuando se
-> implemente. Los comandos marcados como *esperados* fallan hoy porque los módulos no están escritos.
-> La sección 1 sí es ejecutable ahora.
+> **Estado: implementación parcial (T001–T026 y T029).** El estimador de posición, el control, el
+> compositor, el `Protocol Transporte` y `TransporteSPP` (RFCOMM de un byte) **están escritos**. La
+> suite completa está en verde: **382 passed, 5 skipped** (307 unit + 75 integration). Falta la cola
+> de transporte (`ColaTransporte`, `TransporteSimulado`) y todo el cableado de métricas/integración
+> (T027, T028, T030–T042); los comandos que dependen de esos módulos **hoy no existen** y se marcan
+> como *planificados* en cada sección.
+>
+> **Números reales de esta pasada (2026-09-28):** `tests/unit/test_compositor.py` → 89 passed;
+> `tests/unit/test_transporte.py` → 21 passed; `tests/unit/test_configuracion.py` → 65 passed;
+> suite completa → 382 passed, 5 skipped; `-m perf` → 14 passed.
 
 ## 0. Requisitos previos
 
 ```powershell
-uv sync                 # instala dependencias (incluye pyserial tras el cambio)
-uv run pytest -q        # suite completa: 167 passed, 5 skipped (estado actual de 001)
+uv sync                 # instala dependencias (no hay ninguna para el transporte: `socket` es estándar)
+uv run pytest -q        # suite completa
 ```
+
+> **No hay que instalar nada para el canal Bluetooth**: el enlace es un socket RFCOMM de la
+> biblioteca estándar, así que no existe una dependencia de terceros que instalar. El destino del
+> enlace se configura con `mac_bluetooth` y `timeout_transporte_s` en `config/vision.json`.
 
 **Footage**: los videos de práctica están en `videos/rutaIdeal/` (4) y `videos/desarrilamiento/` (5),
 478×850, 2730 fotogramas. **No están versionados** (`.gitignore` ignora `videos/`). Las pruebas que los
@@ -92,32 +103,41 @@ uv run pytest tests/unit/test_control_trayectoria.py -k recuperacion -v
 ### US4 — Transporte Bluetooth
 
 ```powershell
-uv run pytest tests/unit/test_transporte.py tests/unit/test_cola_transporte.py -v
+uv run pytest tests/unit/test_transporte.py -v
 ```
+
+> `tests/unit/test_cola_transporte.py` (T027) **todavía no existe**: la cola de transporte está
+> planificada, no implementada. Las filas de la tabla marcadas con *(planificado)* no son ejecutables
+> hoy.
 
 | Prueba | Verifica |
 |--------|----------|
-| Los 4 comandos serializan a las tramas de `mapa-comandos.md` §1 | FR-035 |
-| Checksum XOR correcto en las 4 tramas | FR-035 |
-| `enviar` nunca lanza con puerto inexistente | FR-034 |
-| `ColaTransporte` deduplica comandos idénticos | FR-032 |
-| Fallo de envío deja el comando pendiente | FR-034, T13 |
-| Reconexión reanuda sin duplicar | FR-008 del contrato |
+| Los 4 comandos viajan como **un byte ASCII** según `mapa-comandos.md` §1 (`w`, `a`, `d`, `x`) | FR-035 |
+| El protocolo envía exactamente 1 byte por comando, sin sufijo | FR-035 |
+| `enviar` nunca lanza con una MAC inalcanzable | FR-034 |
+| `enviar` no lanza en una plataforma sin `AF_BLUETOOTH` | FR-034 |
+| La MAC es configurable y la conexión va al canal RFCOMM 1 | FR-028 |
+| El timeout del socket se acota a `timeout_transporte_s` | FR-031 |
+| La conexión es perezosa: se abre en el primer `enviar`, no en el constructor | `api-control.md` §5 (R1, R2) |
+| `ColaTransporte` deduplica comandos idénticos | FR-032 *(planificado, T027)* |
+| Fallo de envío deja el comando pendiente | FR-034, T13 *(planificado, T027)* |
 | `cerrar` es idempotente | T6 |
 
-**Ninguna prueba requiere hardware**: todas usan `TransporteSimulado`. Para probar el SPP real:
-
-```powershell
-# Solo con un módulo BT conectado; no es parte de la suite
-$env:OPTIPILOT_PUERTO = "COM5"
-uv run pytest tests/unit/test_transporte_spp_real.py -v --manual
-```
-
-Esa prueba está **marcada `footage`** y se omite sin la variable.
+**Ninguna prueba requiere hardware**: `TransporteSPP` recibe una **fábrica de sockets inyectable**, de
+modo que la suite ejercita la ruta completa de envío y de fallo contra un doble. Para probar el enlace
+real no existe todavía una prueba dedicada (no hay `test_transporte_enlace_real.py`); cuando la haya,
+deberá tomar la MAC de `config/vision.json` (`mac_bluetooth`) y usar el canal 1 (SPP estándar), y
+marcarse `footage` para omitirse sin el robot conectado. El supuesto de que se envía un byte sin salto
+de línea solo se puede confirmar ahí o en pista (P3/P5).
 
 ---
 
 ## 3. Verificación de integración
+
+> **Planificado (T033, T035, T036): todavía no ejecutable.** `tests/integration/test_control_fotogramas.py`
+> no existe; el compositor se verifica hoy solo a nivel unitario (`tests/unit/test_compositor.py`, 89
+> pruebas). El bucle completo `segmento → estima → decide → compone → encola` requiere además el
+> cableado en `pipeline.py`/`main.py` y la cola de transporte, aún pendientes.
 
 ```powershell
 uv run pytest tests/integration/test_control_fotogramas.py -v
@@ -134,6 +154,10 @@ encola. Verifica la precedencia de seguridad (§3 de `api-control.md`):
 ---
 
 ## 4. Verificación contra footage real
+
+> **Planificado (T038–T041): todavía no ejecutable.** `tests/integration/test_footage_control.py` no
+> existe. La recalibración de `roi_linea` de 001 sí se midió sobre footage (ver `research.md`), pero
+> la verificación del control contra los 9 videos es trabajo futuro.
 
 ```powershell
 $env:OPTIPILOT_VIDEO_DIR = "videos"
@@ -209,8 +233,10 @@ la pista física (de `mapa-comandos.md` §5):
       oscila, recalibrar `x_objetivo`.
 - [ ] **R3 — zona muerta**: ¿la tasa de correcciones real cumple SC-001 (≤ 3 por corrida)?
 - [ ] **R4 — `n_gracia_busqueda`**: ante una pérdida controlada, ¿recupera antes de descarrilar?
-- [ ] **P1–P4** (de `transporte-bluetooth.md` §8): comportamiento del receptor, heartbeat,
-      baudrate suficiente, idempotencia de `DETENER`.
+- [ ] **P1–P5** (de `transporte-bluetooth.md` §8): comportamiento del receptor, heartbeat,
+      confirmaciones del docente, si el receptor espera un delimitador de línea, idempotencia de
+      `DETENER`, y la **MAC real del mBot de pista** (`mac_bluetooth` en `config/vision.json` es hoy
+      una suposición de trabajo).
 
 **Ninguna de estas casillas se puede marcar desde el repositorio.** Marcar checkbox
 específicos de cada una requiere estar físicamente en la pista.

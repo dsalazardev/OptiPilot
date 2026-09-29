@@ -118,8 +118,18 @@ así que el comando es `AVANZAR`. No hay ambigüedad en el origen.
 **Módulo**: `src/vision/compositor.py` (o función en `pipeline.py`) |
 
 ```python
-def componer(decision: DecisionControl, movimiento: DecisionMovimiento) -> DecisionCompuesta: ...
+def componer(
+    decision: DecisionControl,
+    movimiento: DecisionMovimiento,
+    posicion: PosicionLinea,
+) -> DecisionCompuesta: ...
 ```
+
+> **Corrección 2026-09-28 (T025).** La firma original era
+> `componer(decision, movimiento)`, que **no podía construir el resultado**:
+> `DecisionCompuesta` exige además `posicion` y `permitido`. Se añadió `posicion`
+> como tercer parámetro; `permitido` se toma de `movimiento.veredicto` y no
+> necesita entrar. El fallo se detectó al escribir T024, no en revisión.
 
 **Precedencia (normativa, en este orden)**
 
@@ -128,6 +138,15 @@ def componer(decision: DecisionControl, movimiento: DecisionMovimiento) -> Decis
 | 1 | `movimiento.veredicto == NO_AUTORIZADO` | `DETENER` | `VETO_FSM` |
 | 2 | `decision.comando == DETENER` | `DETENER` | la causa de `decision` |
 | 3 | en otro caso | `decision.comando` | la causa de `decision` |
+
+**Reservado: `CausaComando.VETO_FSM`**. El control de trayectoria **no puede**
+proponer `VETO_FSM`: describe una decisión del compositor, no suya. El modelo lo
+hace cumplir, porque `DecisionCompuesta` rechaza construir una decisión con
+`VETO_FSM` y un comando distinto de `DETENER`. La consecuencia observable es que
+las dos paradas del sistema quedan distinguibles por su causa: «el control perdió
+la línea» (`PERDIDA_SIN_MEMORIA`, `GRACIA_AGOTADA`, `FALLO_SEGURO`) frente a «el
+PARE paró al robot» (`VETO_FSM`). Sin esa distinción, SC-007 no sería
+demostrable en las métricas.
 
 **Postcondiciones**
 
@@ -181,39 +200,60 @@ class Transporte(Protocol):
     def ultimo_error(self) -> str | None: ...
 ```
 
-| Implementación | Módulo | Importa `serial` | Usada en |
-|----------------|--------|------------------|----------|
-| `TransporteSimulado` | `src/transporte/simulado.py` | no | **Todas las pruebas** (FR-033) |
-| `TransporteSPP` | `src/transporte/spp.py` | **sí** | Integración real, fuera de `src/vision/` |
+| Implementación | Módulo | Enlace | Usada en |
+|----------------|--------|---------|----------|
+| `TransporteSimulado` | `src/transporte/simulado.py` | ninguno (memoria) | **Todas las pruebas** (FR-033) |
+| `TransporteSPP` | `src/transporte/spp.py` | socket RFCOMM de la estándar | Integración real, fuera de `src/vision/` |
 
 **Postcondiciones**
 
 | # | Postcondición |
-|---|---------------|
-| Q24 | `enviar` devuelve `bool`; **nunca** lanza por desconexión, timeout o puerto inexistente (FR-034). |
+|---|--------------|
+| Q24 | `enviar` devuelve `bool`; **nunca** lanza por desconexión, timeout o MAC inalcanzable (FR-034). |
 | Q25 | `cerrar` es idempotente (múltiples llamadas no fallan). |
 | Q26 | `conectado` es consultable sin excepción en cualquier momento. |
 | Q27 | `ultimo_error` devuelve `None` si no hay fallo pendiente. |
 
+**Conexión perezosa de `TransporteSPP`** (comportamiento normativo)
+
+| # | Regla |
+|---|------|
+| R1 | El socket **no** se abre en el constructor: `__init__` solo guarda `mac_bluetooth`, `timeout_transporte_s` y la fábrica inyectable. |
+| R2 | La apertura ocurre en el **primer `enviar`**: `socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM)`, `settimeout(timeout_transporte_s)`, `connect((mac_bluetooth, 1))`. |
+| R3 | Canal fijo **1** (SPP estándar); no se configura. |
+| R4 | La fábrica de sockets es **inyectable**: las pruebas ejercitan envío y fallo contra un doble, sin hardware y sin proveedor de Bluetooth en el SO. |
+| R5 | Si `AF_BLUETOOTH` o `BTPROTO_RFCOMM` no existen en la plataforma, se registra el motivo y `enviar` devuelve `False`; **no** es una excepción. |
+| R6 | Un envío posterior a una desconexión reabre el enlace best-effort una vez; si falla, sigue devolviendo `False` sin lanzar. |
+
+**Por qué la apertura es perezosa**: abrir en el constructor ataría el fallo de conexión al arranque
+del proceso, y el CLI debe poder arrancar y validar el pipeline **sin** robot. La conexión se hace
+efectivamente en el primer envío.
+
 ---
 
-## 6. Formato de trama del protocolo (ver `transporte-bluetooth.md`)
+## 6. Formato del mensaje del protocolo (ver `transporte-bluetooth.md`)
 
 Resumen; el formato completo vive en su propio contrato.
 
 ```text
- trama = Header(1B) + Opcode(1B) + Payload(1B) + Checksum(1B)
+  mensaje = Byte(1) = carácter ASCII del comando
 ```
 
-| Campo | Valor |
-|-------|-------|
-| `Header` | `0xA5` — inicio de trama (sincronización) |
-| `Opcode` | `0x01` = `AVANZAR`, `0x02` = `IZQUIERDA`, `0x03` = `DERECHA`, `0x04` = `DETENER` |
-| `Payload` | reservado, `0x00` en v1 |
-| `Checksum` | XOR de los 3 bytes anteriores |
+| Elemento | Valor |
+|----------|-------|
+| Tamaño | **1 byte**, longitud fija |
+| Contenido | `w` = `AVANZAR`, `a` = `IZQUIERDA`, `d` = `DERECHA`, `x` = `DETENER` |
+| Trama / cabecera / payload | **No existen** |
+| Checksum / endianness / delimitador | **No existen** |
 
-Longitud fija de **4 bytes**. Justificación de la longitud fija y del checksum en
-`transporte-bluetooth.md`.
+Se escribe con `sendall(serializar(comando))`. El enlace es **auto-sincronizable por construcción**:
+como cada mensaje es un byte completo e independiente, un byte perdido pierde un comando, nunca la
+alineación del flujo.
+
+**Supuesto declarado (no verificado)**: se envía exactamente un byte, **sin salto de línea**, porque
+así funciona un receptor que lee un byte por comando. El `Robot.py` del profesor no está en este
+repositorio, así que el supuesto no pudo comprobarse contra la fuente. Queda registrado como pregunta
+abierta P3/P5 (`transporte-bluetooth.md` §8).
 
 ---
 
@@ -228,7 +268,7 @@ Longitud fija de **4 bytes**. Justificación de la longitud fija y del checksum 
 | Llamadas de escritura bloqueantes en el bucle de visión | Rompe SC-005 y el Principio IV («sin operaciones bloqueantes») |
 | Usar `HoughLinesP` o `fitLine` | Principio I y §III: detección automática de la línea (FR-003) |
 | `x_objetivo` fijo en el código | Depende del montaje físico; debe ser parámetro (FR-005) |
-| Git-tracked `.venv`, secretos o `serial` hardcodeado | Principio III |
+| Git-tracked `.venv`, secretos o una MAC de destino hardcodeada en el código | Principio III; la MAC es un parámetro de configuración (`mac_bluetooth`) |
 
 ---
 

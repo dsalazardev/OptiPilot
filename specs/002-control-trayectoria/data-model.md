@@ -20,6 +20,8 @@ mismo mecanismo de carga y validación (`cargar_parametros` mezcla defaults + ar
 `ConfiguracionInvalidaError(campo, motivo)`). No se crea un archivo de configuración paralelo
 (FR-038).
 
+**Nueve parámetros**: siete de control/posición y dos de transporte.
+
 | Campo | Tipo | Default | Validación | Trazabilidad |
 |-------|------|---------|------------|--------------|
 | `x_objetivo` | float | 0.5 (provisional) | `0.0 <= x <= 1.0` | FR-004, FR-005 (Decisión 3) |
@@ -29,9 +31,8 @@ mismo mecanismo de carga y validación (`cargar_parametros` mezcla defaults + ar
 | `zona_muerta` | float | 0.10 | `0.0 <= z < 0.5` | FR-012, FR-013 |
 | `histeresis` | float | 0.03 | `0.0 <= h`; `z - h >= 0` | FR-012 |
 | `n_gracia_busqueda` | int | 5 | `>= 0` | FR-019 (Decisión 4) |
-| `puerto_serial` | str \| None | `None` | `None` o no vacío | FR-028 |
-| `baudrate` | int | 9600 | `>= 1200` | FR-028 |
-| `timeout_serial_s` | float | 0.20 | `> 0` | FR-031 |
+| `mac_bluetooth` | str | `00:1B:10:21:2C:1B` (provisional) | 6 pares hexadecimales `XX:XX:XX:XX:XX:XX` | FR-028 |
+| `timeout_transporte_s` | float | 0.20 | `> 0` | FR-031 |
 
 **Restricciones cruzadas** (fallan la carga, no el runtime):
 
@@ -44,8 +45,8 @@ Reglas resumidas aquí; la lista normativa completa es V1–V6 en
 | `zona_muerta - histeresis >= 0.0` (V2) | Si no, el umbral de retorno sería negativo y la histéresis no tendría sentido |
 | `frac_anticipacion < 1.0` (V3) | Deja una banda de lectura de altura `(1 - frac_anticipacion) * alto_roi > 0` dentro de la ROI; con 1.0 la banda se vaciaría |
 | `frac_pico > 0.0` (V4) | Con 0 el soporte sería toda la ROI y el centroide caería en el centro global, no en el de la línea |
-| `baudrate >= 1200` (V5) | Por debajo, la trama de 4 bytes no es fiable con un ATmega a 16 MHz |
-| `timeout_serial_s > 0.0` (V6) | Con 0 el puerto quedaría en modo bloqueante infinito |
+| `mac_bluetooth` con formato `XX:XX:XX:XX:XX:XX` (V5) | Una MAC mal escrita no se detecta hasta el primer `connect`, en plena pista; se rechaza en carga |
+| `timeout_transporte_s > 0.0` (V6) | Con 0 el socket quedaría en modo bloqueante infinito |
 | `n_gracia_busqueda >= 0` | 0 significa `DETENER` inmediato (configuración válida, aunque no recomendada) |
 
 **No se toca en esta spec** (decisión del equipo): `t_parada_s`, `n_confirmacion`, `k_tolerancia`,
@@ -150,21 +151,42 @@ Contrato mínimo. La **definición** no hace I/O; las implementaciones sí.
 
 | Miembro | Firma | Contrato |
 |---------|--------|----------|
-| `enviar` | `(comando: ComandoMovimiento) -> bool` | Encola/serializa el comando. Devuelve `True` si se aceptó. Nunca lanza por desconexión. |
+| `enviar` | `(comando: ComandoMovimiento) -> bool` | Serializa el comando a **1 byte ASCII** y lo entrega con `sendall()`. Devuelve `True` si se aceptó. Nunca lanza por desconexión. |
 | `cerrar` | `() -> None` | Libera el recurso. Idempotente. |
 | `conectado` | `() -> bool` | Estado de conexión, consultable sin excepción. |
 | `ultimo_error` | `() -> str \| None` | Último fallo registrado, para métricas. |
+
+**El mensaje es un byte único.** No hay trama, cabecera, longitud, payload, checksum, endianness ni
+delimitador: cada `sendall()` es un comando completo y autónomo. El mapeo es el que fijó el profesor
+junto con su código de ejemplo del mBot:
+
+| `ComandoMovimiento` | Byte enviado | Hex | Significado |
+|---------------------|--------------|-----|-------------|
+| `AVANZAR` | `b"w"` | `0x77` | Avanza recto |
+| `IZQUIERDA` | `b"a"` | `0x61` | Corrige hacia la izquierda |
+| `DERECHA` | `b"d"` | `0x64` | Corrige hacia la derecha |
+| `DETENER` | `b"x"` | `0x78` | Detiene (incluye parada de seguridad) |
+
+Los cuatro bytes son distintos y ninguno es un valor de control ni un espacio, así que no hay
+ambigüedad posible con la configuración del enlace. `DETENER` usa `x` y no `w`: una parada nunca
+puede confundirse con un avance. Contrato completo en `transporte-bluetooth.md` §2–§3.
+
+**Enlace**: socket RFCOMM de la biblioteca estándar —
+`socket(AF_BLUETOOTH, SOCK_STREAM, BTPROTO_RFCOMM)` contra el **canal 1** (SPP estándar) de
+`params.mac_bluetooth`, con `params.timeout_transporte_s` como cota de la escritura. La apertura es
+**perezoza**: ocurre en el primer `enviar`, nunca en el constructor, para que el CLI pueda arrancar y
+validar el pipeline sin robot.
 
 **Implementaciones**:
 
 | Clase | Módulo | Rol |
 |-------|--------|-----|
-| `TransporteSimulado` | `src/transporte/simulado.py` | Registra comandos en memoria. **Usado por todas las pruebas** (FR-033). |
-| `TransporteSPP` | `src/transporte/spp.py` | SPP/RFCOMM con `pyserial` sobre COM. Único punto del proyecto que importa `serial`. |
+| `TransporteSimulado` | `src/transporte/simulado.py` | Registra comandos en memoria. **Usado por todas las pruebas** (FR-033). Pendiente (T028). |
+| `TransporteSPP` | `src/transporte/spp.py` | SPP/RFCOMM con `socket` de la estándar. Único punto del proyecto que abre un socket. |
 
 **Por qué un Protocol y no una clase base**: permite que las pruebas inyecten el simulado sin
-herencia, y que `src/vision/` no dependa de nada de `pyserial`. `src/transporte/` es el **único**
-paquete que importa el driver real.
+herencia, y que `src/vision/` no dependa de nada del enlace. `src/transporte/` es el **único**
+paquete que hace I/O.
 
 ### 9. ColaTransporte (stateful) — FR-031, FR-032
 
@@ -244,10 +266,10 @@ MaquinaEstados (001)                   │
                                           ▼
                                  ColaTransporte.encolar()
                                           │
-                          ┌───────────────┴───────────────┐
-                          ▼                               ▼
-                            TransporteSimulado        TransporteSPP (pyserial)
-                          (pruebas)                   (hardware, fuera de visión/)
+                           ┌───────────────┴───────────────┐
+                           ▼                               ▼
+                             TransporteSimulado        TransporteSPP (RFCOMM)
+                             (pruebas)                   (hardware, fuera de visión/)
                                           │
                                           ▼
                                   MetricasControl
@@ -268,7 +290,7 @@ y sus agregados (confianza media, velocidad de error) sí van a métricas.
 ## Fuera de este modelo
 
 - **Telemetría del robot**: no hay lectura de sensores ni confirmaciones (unidireccional, US4).
-- **Firmware del receptor**: la decodificación de tramas vive en el microcontrolador, fuera del
+- **Firmware del receptor**: la decodificación del byte vive en el microcontrolador, fuera del
   repositorio.
 - **Trayectoria o cartografía**: el robot no mapea la pista; sólo corrige cuadro a cuadro.
 - **PID o control de velocidad**: imposible con la API de 4 comandos discretos (`research.md`

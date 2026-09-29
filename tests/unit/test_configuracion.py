@@ -152,9 +152,8 @@ PARAMETROS_CONTROL = [
     ("zona_muerta", 0.10),
     ("histeresis", 0.03),
     ("n_gracia_busqueda", 5),
-    ("puerto_serial", None),
-    ("baudrate", 9600),
-    ("timeout_serial_s", 0.20),
+    ("mac_bluetooth", "00:1B:10:21:2C:1B"),
+    ("timeout_transporte_s", 0.20),
 ]
 
 
@@ -190,25 +189,25 @@ def test_control_se_puede_sobreescribir_desde_json(tmp_path: Path) -> None:
         "zona_muerta": 0.08,
         "histeresis": 0.02,
         "n_gracia_busqueda": 9,
-        "puerto_serial": "COM7",
-        "baudrate": 115200,
-        "timeout_serial_s": 0.5,
+        "mac_bluetooth": "AA:BB:CC:DD:EE:FF",
+        "timeout_transporte_s": 0.5,
     }
     parametros = cargar_parametros(_escribir(tmp_path, valores))
     for campo, esperado in valores.items():
         assert getattr(parametros, campo) == esperado, campo
 
 
-def test_puerto_serial_admite_null_explicito(tmp_path: Path) -> None:
-    """``null`` en el JSON significa transporte simulado, no un rechazo."""
-    parametros = cargar_parametros(_escribir(tmp_path, {"puerto_serial": None}))
-    assert parametros.puerto_serial is None
-
-
-def test_puerto_serial_rechaza_un_numero(tmp_path: Path) -> None:
+def test_mac_bluetooth_rechaza_un_numero(tmp_path: Path) -> None:
     with pytest.raises(ConfiguracionInvalidaError) as exc:
-        cargar_parametros(_escribir(tmp_path, {"puerto_serial": 7}))
-    assert exc.value.campo == "puerto_serial"
+        cargar_parametros(_escribir(tmp_path, {"mac_bluetooth": 7}))
+    assert exc.value.campo == "mac_bluetooth"
+
+
+def test_mac_bluetooth_rechaza_null_explicito(tmp_path: Path) -> None:
+    """A diferencia del puerto COM, la MAC del mBot no es opcional (V5)."""
+    with pytest.raises(ConfiguracionInvalidaError) as exc:
+        cargar_parametros(_escribir(tmp_path, {"mac_bluetooth": None}))
+    assert exc.value.campo == "mac_bluetooth"
 
 
 # V1–V6 del contrato: cada regla cruzada, con el campo al que se atribuye el rechazo.
@@ -217,8 +216,8 @@ REGLAS_CRUZADAS = [
     ("V2 zona_muerta - histeresis >= 0.0", {"zona_muerta": 0.05, "histeresis": 0.10}, "histeresis"),
     ("V3 frac_anticipacion < 1.0", {"frac_anticipacion": 1.0}, "frac_anticipacion"),
     ("V4 frac_pico > 0.0", {"frac_pico": 0.0}, "frac_pico"),
-    ("V5 baudrate >= 1200", {"baudrate": 960}, "baudrate"),
-    ("V6 timeout_serial_s > 0.0", {"timeout_serial_s": 0.0}, "timeout_serial_s"),
+    ("V5 mac_bluetooth con formato MAC", {"mac_bluetooth": "00-1B-10-21-2C-1B"}, "mac_bluetooth"),
+    ("V6 timeout_transporte_s > 0.0", {"timeout_transporte_s": 0.0}, "timeout_transporte_s"),
 ]
 
 
@@ -241,7 +240,10 @@ RANGOS_RECHAZADOS = [
     ("zona_muerta", 1.2),
     ("histeresis", -0.01),
     ("n_gracia_busqueda", -1),
-    ("puerto_serial", "   "),
+    ("mac_bluetooth", "   "),
+    ("mac_bluetooth", "00:1B:10:21:2C"),
+    ("mac_bluetooth", "00:1B:10:21:2C:1B:7F"),
+    ("mac_bluetooth", "ZZ:1B:10:21:2C:1B"),
 ]
 
 

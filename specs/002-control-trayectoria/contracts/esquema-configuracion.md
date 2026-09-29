@@ -41,14 +41,13 @@ JSON plano, un bloque por concepto, coherente con el estilo de `config/vision.js
   "zona_muerta": 0.10,
   "histeresis": 0.03,
   "n_gracia_busqueda": 5,
-  "puerto_serial": null,
-  "baudrate": 9600,
-  "timeout_serial_s": 0.20
+  "mac_bluetooth": "00:1B:10:21:2C:1B",
+  "timeout_transporte_s": 0.20
 }
 ```
 
-**Tipos admitidos**: `float` para fracciones normalizadas, `int` para conteos de fotogramas y baudios,
-`str | null` para el puerto serie.
+**Tipos admitidos**: `float` para fracciones normalizadas, `int` para conteos de fotogramas, `str`
+para la dirección MAC del robot.
 
 ---
 
@@ -113,18 +112,14 @@ corrección.
 
 | Clave | Tipo | Default | Rango válido | Unidad | Trazabilidad |
 |-------|------|---------|--------------|--------|--------------|
-| `puerto_serial` | str \| null | `null` | `null` o no vacío | — | FR-028 |
-| `baudrate` | int | `9600` | `>= 1200` | bits/s | FR-028 |
-| `timeout_serial_s` | float | `0.20` | `> 0.0` | segundos | FR-031 |
+| `mac_bluetooth` | str | `00:1B:10:21:2C:1B` | `XX:XX:XX:XX:XX:XX` (6 pares hexadecimales) | — | FR-028 |
+| `timeout_transporte_s` | float | `0.20` | `> 0.0` | segundos | FR-031 |
 
-**Significado de `puerto_serial`**: puerto COM del módulo Bluetooth (`"COM5"`). `null` (default)
-significa «sin hardware»: el CLI funciona igual usando `TransporteSimulado`, que es lo que permiten
-las pruebas headless.
+**Significado de `mac_bluetooth`**: dirección Bluetooth del mBot, el destino del enlace RFCOMM. El
+canal es el estándar del perfil Serial Port Profile (**1**) y no se configura. El default es una
+**suposición de trabajo**, no un dato del docente: es la P5 de `transporte-bluetooth.md` §8.
 
-**Significado de `baudrate`**: velocidad del enlace serie. 9600 basta para tramas de 4 bytes y es el
-valor habitual en módulos HC-05/HC-06 con ATmega a 16 MHz.
-
-**Significado de `timeout_serial_s`**: cota superior de una escritura bloqueada. Acota el peor caso
+**Significado de `timeout_transporte_s`**: cota superior de una escritura bloqueada. Acota el peor caso
 si el módulo BT está desconectado; el envío ocurre fuera del bucle de visión, pero aun así acotarlo
 evita que el proceso se cuelgue.
 
@@ -141,8 +136,8 @@ Se evalúan **después** de la validación individual, y también fallan en carg
 | V2 | `zona_muerta - histeresis >= 0.0` | `histeresis` | Si el umbral de retorno fuese negativo, la histéresis no tendría banda y la conmutación sería ambigua. |
 | V3 | `frac_anticipacion < 1.0` | `frac_anticipacion` | Una anticipación de 1.0 vaciaría la banda de lectura; `PosicionLinea` nunca podría ser válida. |
 | V4 | `frac_pico > 0.0` | `frac_pico` | Un umbral de 0 tomaría toda la ROI como soporte y el centroide se iría al centroide global, no al de la línea. |
-| V5 | `baudrate >= 1200` | `baudrate` | Por debajo, la transmisión de 4 bytes no es fiable con un ATmega a 16 MHz. |
-| V6 | `timeout_serial_s > 0.0` | `timeout_serial_s` | Con 0 el puerto quedaría en modo bloqueante infinito. |
+| V5 | `mac_bluetooth` con formato `XX:XX:XX:XX:XX:XX` (6 pares hexadecimales) | `mac_bluetooth` | Una MAC mal escrita no falla en carga sino en el primer `connect`, es decir en plena pista, y el síntoma es un `enviar → False` sin causa clara. Se rechaza al arrancar. |
+| V6 | `timeout_transporte_s > 0.0` | `timeout_transporte_s` | Con 0 el socket quedaría en modo bloqueante infinito. |
 
 **Relación con el borde de la zona muerta (edge case)**: la pertenencia se define inclusiva por
 dentro y exclusiva por fuera, de modo que la conmutación es determinista:
@@ -187,16 +182,15 @@ dentro y exclusiva por fuera, de modo que la conmutación es determinista:
   "zona_muerta": 0.10,
   "histeresis": 0.03,
   "n_gracia_busqueda": 5,
-  "puerto_serial": null,
-  "baudrate": 9600,
-  "timeout_serial_s": 0.20
+  "mac_bluetooth": "00:1B:10:21:2C:1B",
+  "timeout_transporte_s": 0.20
 }
 ```
 
-Los diez valores nuevos son los defaults documentados. **El archivo no se modifica en esta spec**:
+Los nueve valores nuevos son los defaults documentados. **El archivo no se modifica en esta spec**:
 los defaults del código ya permiten correr sin tocar la configuración, y el archivo versionado se
 actualizará solo si el equipo decide fijar valores distintos del default (p. ej. un
-`x_objetivo` recalibrado con el robot montado).
+`x_objetivo` recalibrado con el robot montado, o la MAC real del mBot de pista).
 
 ---
 
@@ -208,7 +202,7 @@ actualizará solo si el equipo decide fijar valores distintos del default (p. ej
 | `zona_muerta` | **Provisional (0.10)** | Recalibrar con cámara fija; verificar que la tasa de correcciones baja sin descarrilamiento. |
 | `histeresis` | **Provisional (0.03)** | Ajustar según la respuesta real de los motores. |
 | `n_gracia_busqueda` | **Provisional (5)** | Ajustar al tiempo de giro real del robot (cinemática definida por el docente). |
-| `puerto_serial` | **Pendiente** | Se detecta en la laptop del equipo al conectar el módulo; no se versiona. |
+| `mac_bluetooth` | **Pendiente (suposición de trabajo)** | El default `00:1B:10:21:2C:1B` no es un dato del docente: hay que confirmarlo con él (P5 de `transporte-bluetooth.md` §8) y corregirlo aquí. |
 
 **Principio VI**: estos vacíos se registran en `AGENTS.md` §27 como pendientes, no se asumen en
 silencio. La Constitución lo exige expresamente para los valores que deja al docente.
@@ -224,6 +218,6 @@ silencio. La Constitución lo exige expresamente para los valores que deja al do
 | FR-013 | `zona_muerta`, `histeresis` (+ reglas V1, V2) |
 | FR-007 | `frac_pico`, `umbral_confianza` (+ reglas V3, V4) |
 | FR-019 | `n_gracia_busqueda` |
-| FR-028 | `puerto_serial`, `baudrate` |
-| FR-031 | `timeout_serial_s` (+ regla V5, V6) |
+| FR-028 | `mac_bluetooth` (+ regla V5) |
+| FR-031 | `timeout_transporte_s` (+ regla V6) |
 | FR-038 | Toda la tabla: centralizados, documentados, modificables sin tocar lógica |

@@ -17,12 +17,16 @@ El profesor fijó el vocabulario. No hay más comandos ni menos: **no existe com
 distancia, de duración de giro ni de retroceso**. Esa restricción es la razón por la que la ley de
 control es bang-bang por construcción (`research.md` Decisión 2).
 
-| Comando | Significado | Se emite cuando | Opcode SPP |
+| Comando | Significado | Se emite cuando | Byte ASCII |
 |---------|-------------|-----------------|------------|
-| `AVANZAR` | El robot avanza recto siguiendo la línea | La línea está dentro de la zona muerta | `0x01` |
-| `IZQUIERDA` | El robot corrige hacia la izquierda | La línea está a la izquierda del objetivo, o búsqueda por memoria hacia la izquierda | `0x02` |
-| `DERECHA` | El robot corrige hacia la derecha | La línea está a la derecha del objetivo, o búsqueda por memoria hacia la derecha | `0x03` |
-| `DETENER` | El robot se detiene | Pérdida de línea sin memoria, gracia agotada, veto por PARE, o fallo interno | `0x04` |
+| `AVANZAR` | El robot avanza recto siguiendo la línea | La línea está dentro de la zona muerta | `w` (0x77) |
+| `IZQUIERDA` | El robot corrige hacia la izquierda | La línea está a la izquierda del objetivo, o búsqueda por memoria hacia la izquierda | `a` (0x61) |
+| `DERECHA` | El robot corrige hacia la derecha | La línea está a la derecha del objetivo, o búsqueda por memoria hacia la derecha | `d` (0x64) |
+| `DETENER` | El robot se detiene | Pérdida de línea sin memoria, gracia agotada, veto por PARE, o fallo interno | `x` (0x78) |
+
+El mapeo lo fijó el profesor junto con el código de ejemplo del mBot (2026-09-28). Cada comando viaja
+como **un único byte**, sin trama, cabecera, checksum ni delimitador: el receptor lee un byte por
+comando. Ver `transporte-bluetooth.md` §2.
 
 ### Precisión semántica importante
 
@@ -187,6 +191,6 @@ fotogramas generan esta evidencia (SC-009).
 | `CausaComando` (data-model §6) | §2 (tabla de decisión) |
 | Precedencia de seguridad (`api-control.md` §3) | §3 |
 | Escenarios de aceptación US2/US3 (spec.md) | §4 (escenarios A–E) |
-| Opcodes SPP (`transporte-bluetooth.md` §3) | §1 (columna Opcode) |
+| Mapa de bytes (`transporte-bluetooth.md` §3) | §1 (columna Byte ASCII) |
 | Riesgos abiertos (`research.md`, `spec.md` Supuestos) | §5 |
 | FR-037, SC-009 (evidencia visual) | §6 |

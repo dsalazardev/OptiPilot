@@ -341,6 +341,12 @@ revisable.
 
 ## Decisión 6: Dónde y cómo aislar el transporte
 
+> **⚠️ PARCIALMENTE SUPERADA (2026-09-28).** Ver la Decisión 7. Lo que **sigue vigente** es el
+> aislamiento: `src/transporte/` fuera de `src/vision/`, el `Protocol` mínimo, el simulado para
+> pruebas headless y el desacople por `ColaTransporte`. Lo que **queda superado** es la elección de
+> dependencia: se pasa de `pyserial` a `socket` de la biblioteca estándar. El razonamiento original
+> se conserva sin reescribir, porque explica por qué el aislamiento era necesario.
+
 ### Contexto
 
 Bluetooth es E/S. `src/vision/` es, por diseño de 001, lógica pura sin I/O (conftest, CLI y tests lo
@@ -368,8 +374,81 @@ dependientes de hardware.
 
 ### Sobre el nombre de la dependencia
 
-`pyserial` es un transporte de propósito general: no observa imágenes, no decide nada de la
-detección. Su justificación bajo el Principio III es directa. Se documenta en `plan.md`.
+> **SUPERADA (2026-09-28).** `pyserial` fue la opción original, elegida por ser un transporte de
+> propósito general (no observa imágenes ni decide nada de la detección) y por encajar con los
+> módulos Bluetooth de la familia HC-05/HC-06 sobre un microcontrolador ATmega. **El profesor
+> confirmó que el protocolo real es un byte ASCII por comando sobre un socket RFCOMM**, con lo que el
+> puerto COM y su velocidad nunca existen: `pyserial` no tenía uso. Se retiró de `pyproject.toml` y
+> de `uv.lock`, y la decisión vigente es la Decisión 7.
+
+---
+
+## Decisión 7: El protocolo es un byte ASCII sobre RFCOMM
+
+> **⚠️ SUPERADA (2026-09-28) la decisión de formato de trama.** Este bloque **sustituye** el
+> protocolo de 4 bytes con cabecera `0xA5` y checksum XOR que los contratos de esta feature
+> definieron originalmente. Ese diseño estaba en `contracts/transporte-bluetooth.md`,
+> `contracts/mapa-comandos.md` y `contracts/api-control.md` §6; los contratos se reescribieron el
+> mismo día. El diseño anterior se conserva aquí solo como registro de lo que se decidió y por qué,
+> **no** como especificación vigente.
+
+### Qué decía el diseño anterior
+
+| Aspecto | Diseño anterior (ya superado) |
+|---------|-------------------------------|
+| Tamaño | 4 bytes fijos |
+| Cabecera | `0xA5`, para resincronizar el flujo |
+| Opcode | `0x01` = `AVANZAR`, `0x02` = `IZQUIERDA`, `0x03` = `DERECHA`, `0x04` = `DETENER` |
+| Payload | Reservado, `0x00` en v1 |
+| Checksum | XOR de los 3 bytes anteriores |
+| Transporte | Puerto COM del módulo Bluetooth, abierto con `pyserial` |
+| Configuración | `puerto_serial` + `baudrate` (9600) |
+
+**Por qué se eligió así**: una trama con cabecera y checksum es la forma habitual de hacer un enlace
+de bytes robusto, y el argumento era que un receptor que lee un flujo continuo necesita saber dónde
+empieza cada mensaje y detectar corrupción. Sobre esa base se justificó `baudrate = 9600` como
+suficiente para 4 bytes, y de ahí la regla de validación `baudrate >= 1200` (V5).
+
+### Qué cambió y por qué
+
+El profesor envió el código de ejemplo del mBot y confirmó el canal. Tres hechos desmintieron el
+diseño anterior:
+
+1. **No hay puerto COM.** El enlace es un socket RFCOMM; no existe una velocidad de enlace que
+   configurar. `baudrate` y `puerto_serial` desaparecen, y con ellos la regla V5 y la constante
+   `9600`.
+2. **No hay trama.** Cada comando es **un byte ASCII**: `w` = `AVANZAR`, `a` = `IZQUIERDA`,
+   `d` = `DERECHA`, `x` = `DETENER`. Sin cabecera, sin payload, sin checksum, sin endianness y sin
+   delimitador.
+3. **No hace falta dependencia.** El socket se abre con `socket.AF_BLUETOOTH` + `SOCK_STREAM` +
+   `socket.BTPROTO_RFCOMM` contra el canal 1 (SPP estándar) de la `mac_bluetooth`, y se escribe con
+   `sendall()`. `socket` es de la biblioteca estándar, así que el transporte pasa a tener **cero
+   dependencias de terceros**: no hay nada que declarar en `pyproject.toml` ni en `uv.lock`.
+
+### Decisión
+
+Se adopta el **byte único** sobre RFCOMM, con la tabla de mapeo del profesor como frontera
+verificable entre el software de este equipo y el firmware del robot. Contrato normativo:
+`contracts/transporte-bluetooth.md` §2–§4.
+
+**Consecuencia colateral favorable**: al no haber trama, desaparecen de un plumazo toda una clase de
+problemas que el diseño anterior tenía que resolver —resincronización del flujo, checksum,
+receptor desfasado—, y no se pierde nada: con un solo byte no hay corrupción multi-byte que detectar.
+El enlace queda **auto-sincronizable por construcción**: un byte perdido pierde un comando, nunca la
+alineación.
+
+**Configuración**: `puerto_serial` + `baudrate` → `mac_bluetooth` (string, default
+`00:1B:10:21:2C:1B`) + `timeout_transporte_s` (0.20). El timeout pasa de ser la cota de un puerto
+serie a ser la cota de una escritura bloqueada en el socket, con la misma razón: que un enlace
+caído no congele el proceso. La validación V5 pasa a exigir el formato de MAC
+(`XX:XX:XX:XX:XX:XX`), para que una MAC mal escrita falle al arrancar y no en el primer `connect`,
+ya en pista.
+
+**Supuesto declarado, no verificado**: se envía **exactamente un byte, sin salto de línea**, porque así
+funciona un receptor que lee un byte por comando. El `Robot.py` del profesor **no está en este
+repositorio**, así que el supuesto no pudo comprobarse contra la fuente. Si su receptor esperase un
+terminador de línea, el cambio es la constante `SUFIJO` de `src/transporte/spp.py`. Queda registrado
+como P3/P5 en `transporte-bluetooth.md` §8.
 
 ---
 
@@ -382,7 +461,8 @@ detección. Su justificación bajo el Principio III es directa. Se documenta en 
 | 3 | `x_objetivo` configurable (def. 0.5) | centro del fotograma como constante | medianas 190.0–286.5 px vs centro 239 |
 | 4 | Memoria del último lado con `n_gracia = 5` | `DETENER` inmediato (penaliza tiempo), giro indefinido (descarrila) | vel. de error 52.1 px en desarrilamiento vs 15–20 en ideal |
 | 5 | Composición con veto de la FSM | control manda (fallo de seguridad), tocar `DecisionMovimiento` (rompe 167 tests) | Precedencia de seguridad del Reto |
-| 6 | `src/transporte/` + mock | `src/services/`/`src/models/` (§II) | Constitución §II sobre estructura |
+| 6 | `src/transporte/` + mock (**aislamiento vigente**; la dependencia queda superada) | `src/services/`/`src/models/` (§II) | Constitución §II sobre estructura |
+| 7 | Byte único ASCII sobre socket RFCOMM, sin dependencia de terceros | Trama de 4 bytes con cabecera `0xA5` y checksum XOR (SUPERADA 2026-09-28); `pyserial` sobre COM | Protocolo confirmado por el profesor junto con su código de ejemplo del mBot |
 
 ## Riesgos abiertos
 
@@ -393,3 +473,4 @@ detección. Su justificación bajo el Principio III es directa. Se documenta en 
 | La máscara de línea es «cualquier píxel oscuro» (`v_max: 110`, H/S completo) | Medio: 15–17 % de ocupación; sombras contaminan | Fuera de alcance (corregido en cambio previo a nivel de ROI, no de rango); el estimador es tolerante por peakedness |
 | `roi_linea` anidada dentro de `roi_senales` | Bajo: un píxel rojo oscuro (`v` 90–110) cae en ambas máscaras | Documentado en spec.md Dependencias; no afecta a US1 (solo usa `mascara_linea`) |
 | `t_parada_s = 3.0` provisional | Bajo para esta spec | Fuera de alcance explícito (decisión del equipo) |
+| **Supuesto de un byte sin salto de línea no verificado** | Alto si es falso: el receptor descartaría o acumularía bytes y el robot no obedecería | Declarado en Decisión 7 y en `transporte-bluetooth.md` §2; registrado como P3/P5. El `Robot.py` del profesor no está en el repositorio. El ajuste, si hace falta, es la constante `SUFIJO` |

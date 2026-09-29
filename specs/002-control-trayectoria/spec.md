@@ -14,7 +14,8 @@
 
 ### Session 2026-09-28
 
-- Q: ¿Qué canal de comunicación con el robot? → A: **Bluetooth Classic (SPP/RFCOMM)**, implementado con `pyserial` sobre un puerto COM. Es el estándar directo para módulos HC-05/HC-06 con microcontroladores ATmega/Arduino, habituales en prototipos académicos de robots. Se descarta BLE/GATT (`bleak`): el microcontrolador receptor no expone un perfil de servicio que el equipo haya definido.
+- Q: ¿Qué canal de comunicación con el robot? → A: **Bluetooth Classic (SPP/RFCOMM)**, implementado con un socket RFCOMM de la biblioteca estándar (`socket.AF_BLUETOOTH` + `SOCK_STREAM` + `BTPROTO_RFCOMM`) contra el canal 1 del mBot. Es el estándar directo para módulos Bluetooth con microcontroladores ATmega/Arduino, habituales en prototipos académicos de robots. Se descarta BLE/GATT (`bleak`): el microcontrolador receptor no expone un perfil de servicio que el equipo haya definido.
+- Q: ¿Cada comando viaja en una trama o en un byte suelto? → A: **Un byte ASCII por comando**, sin trama, cabecera, payload, checksum ni delimitador. El profesor confirmó el mapeo junto con su código de ejemplo: `AVANZAR` = `w` (0x77), `IZQUIERDA` = `a` (0x61), `DERECHA` = `d` (0x64), `DETENER` = `x` (0x78). Ver `contracts/transporte-bluetooth.md` §2–§3.
 - Q: ¿Se toca la duración de parada PARE (`t_parada_s`, hoy 3.0 provisional)? → A: **No.** Queda fuera del alcance de esta spec y se trata por separado como parámetro pendiente de confirmar con el docente.
 - Q: ¿Dónde vive el código de transporte? → A: En un paquete nuevo y explícito `src/transporte/`, **fuera** de `src/vision/`. `src/models/` y `src/services/` permanecen vacíos: la Constitución §II exige justificar la estructura por el pipeline, no por nombres de carpetas.
 - Q: ¿Ante una pérdida momentánea de la línea, el robot se detiene o busca? → A: **Memoria temporal del último lado conocido con timeout.** Durante una ventana de gracia de N fotogramas el robot gira suavemente hacia el último lado donde se detectó la línea; si la línea no reaparece, emite `DETENER` por seguridad. Esto puntúa «capacidad de recuperar la trayectoria» sin arriesgar un giro infinito ni una salida de pista.
@@ -142,7 +143,7 @@ no-bloqueo del bucle— sin requerir módulo Bluetooth ni robot.
 4. **Given** un fotograma con `DETENER` y un comando de corrección previo, **When** se compone la
    decisión, **Then** el `DETENER` prevalece y es lo único que se transmite.
 5. **Given** una desconexión durante una corrida, **When** se reconecta, **Then** el transporte
-   reanuda el envío del último comando válido sin duplicar tramas.
+   reanuda el envío del último comando válido sin duplicar bytes.
 
 ### Edge Cases
 
@@ -254,10 +255,13 @@ no-bloqueo del bucle— sin requerir módulo Bluetooth ni robot.
 **Transporte Bluetooth (SPP/RFCOMM)**
 
 - **FR-028**: El envío de comandos al robot MUST implementarse sobre Bluetooth Classic (SPP/RFCOMM)
-  mediante `pyserial` sobre un puerto serie (COM en Windows).
-- **FR-029**: `pyserial` MUST declararse en `pyproject.toml` antes de importarse e instalarse con uv
-  (Principio III), y su justificación MUST quedar documentada como transporte de propósito general
-  que no decide nada de la detección.
+  con un socket de la biblioteca estándar —`socket.AF_BLUETOOTH`, `SOCK_STREAM`,
+  `socket.BTPROTO_RFCOMM`—, conectado al canal RFCOMM 1 de la `mac_bluetooth` de configuración, y la
+  escritura MUST hacerse con `sendall()`.
+- **FR-029**: El transporte MUST NOT introducir ninguna dependencia de terceros: el enlace se
+  implementa únicamente con el módulo `socket` de la biblioteca estándar, de modo que no hay nada que
+  declarar en `pyproject.toml` (Principio III). Cualquier alternativa que requiera un driver externo
+  queda descartada.
 - **FR-030**: La interfaz de transporte MUST ser delgada y definir un contrato mínimo (enviar comando,
   cerrar, estado de conexión) sin depender de detalles de Bluetooth en la lógica de control.
 - **FR-031**: El envío MUST ser no bloqueante para el bucle de visión: el comando MUST encolarse y
@@ -271,9 +275,9 @@ no-bloqueo del bucle— sin requerir módulo Bluetooth ni robot.
 - **FR-034**: Una desconexión o fallo de envío MUST registrarse sin lanzar excepción al bucle de
   visión ni alterar la decisión de control; el fallo del transporte no puede cambiar el
   comportamiento de seguridad.
-- **FR-035**: El protocolo de trama (formato de bytes, delimitadores, checksum) MUST documentarse en
-  un contrato verificable, de modo que el receptor del robot pueda implementarlo de forma
-  independiente.
+- **FR-035**: El formato del mensaje MUST documentarse en un contrato verificable: un byte ASCII por
+  comando, la tabla completa de mapeo a bytes, y la ausencia de trama, cabecera, payload, checksum y
+  delimitador, de modo que el receptor del robot pueda implementarlo de forma independiente.
 
 **Métricas y evidencia**
 
@@ -296,8 +300,9 @@ no-bloqueo del bucle— sin requerir módulo Bluetooth ni robot.
   antigüedad; se usa para la recuperación (US3).
 - **DecisionCompuesta**: comando final tras componer control y FSM, con su causa (arbitraje de
   seguridad).
-- **Transporte**: interfaz delgada (enviar/cerrar/conectado) y su implementación SPP real y su
-  implementación simulada.
+- **Transporte**: interfaz delgada (`enviar`/`cerrar`/`conectado`/`ultimo_error`) y su implementación
+  SPP real (`TransporteSPP`); la implementación simulada para pruebas headless sigue pendiente
+  (T028).
 - **MetricasControl**: correcciones por corrida, tiempo por comando, pérdidas y recuperaciones,
   latencia.
 
@@ -350,8 +355,10 @@ no-bloqueo del bucle— sin requerir módulo Bluetooth ni robot.
   entonces.
 - La duración de parada PARE (`t_parada_s`, hoy 3.0) **no** se modifica en esta spec; su confirmación
   con el docente se trata por separado.
-- El protocolo de trama del transporte se define en esta spec como contrato, pero la implementación
-  del receptor es del firmware del robot y queda fuera del alcance del repositorio.
+- El formato del mensaje del transporte se define en esta spec como contrato, pero la implementación
+  del receptor es del firmware del robot y queda fuera del alcance del repositorio. Se asume que se
+  envía **exactamente un byte sin salto de línea** (`transporte-bluetooth.md` §2, P3/P5): el
+  `Robot.py` del profesor no está en este repositorio, así que el supuesto no pudo comprobarse.
 - La pista tiene una línea guía de ancho y contraste constantes; el detector asume una banda
   contigua única. Pistas con dos bandas o bifurcaciones quedan fuera de alcance.
 - No se implementa control de velocidad ni duración de giro: la API del profesor expone solo cuatro
@@ -374,3 +381,7 @@ no-bloqueo del bucle— sin requerir módulo Bluetooth ni robot.
   completo, ocupación 15–17 % en footage). US1 **no** corrige esa calibración — está fuera de
   alcance —; se apoya en la separación de modos por proyección de columnas. La corrección de la
   máscara (p. ej. exigir anchura o rango S mínimo) queda como mejora futura.
+- **Transporte**: el canal hacia el robot no añade ninguna dependencia. `TransporteSPP` usa solo
+  `socket` de la biblioteca estándar (FR-028, FR-029); el destino es la `mac_bluetooth` y el timeout
+  `timeout_transporte_s` que viven en `config/vision.json`, y la fábrica de sockets es inyectable
+  para que las pruebas corran sin hardware.

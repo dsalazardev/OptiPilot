@@ -3,8 +3,8 @@
 **Bootstrap and operating manual for AI agents working in this repository.**
 
 - **Generated:** 2026-09-22 (de una inspección de solo lectura del repositorio).
-- **Última actualización:** 2026-09-28 (pasada de corrección factual, tras un pull que trajo T024–T031). Además de las anteriores, se corrigieron afirmaciones que ya no coincidían con el disco: `uv.lock` existe y está versionado; el footage real no está en esta copia; la ruta del repo ya no es OneDrive; y el trabajo vive en Spec Kit (`specs/`), no en OpenSpec.
-- **Basis:** rama `dev` en `e3bb994` (Fases 1–7, 31/31 tareas). `origin/main` sigue en `7ae33ac` (Fase 2); el merge `dev → main` está pendiente de confirmar con el equipo.
+- **Última actualización:** 2026-09-28, segunda pasada del mismo día. La anterior recogió el estado tras un pull con T024–T031 de la feature 001. Esta segunda pasada registra el **cambio de protocolo de transporte** ordenado por el profesor y la creación de la feature 002.
+- **Basis:** rama `feature/002-control-trayectoria`. Commits: `b2ea2f5` (spec 002), `3ddee48` (US1, estimador), `8341f04` (US2/US3, control). El transporte y el compositor están **sin commitear**.
 - **Language:** este documento está en inglés (estándar para archivos bootstrap de agentes); el material de origen del proyecto está en español. Conserva en español los términos del dominio: *Reto 1, PARE, SIGA, rúbrica, descarrilamiento*.
 
 ---
@@ -25,9 +25,9 @@ Read order for a new agent joining this project:
 Re-verification quick commands (run from the repo root):
 
 ```bash
-git rev-parse --abbrev-ref HEAD   # expect: dev
+git rev-parse --abbrev-ref HEAD   # expect: feature/002-control-trayectoria
 git status --short                # working tree state
-uv run pytest -q                  # full suite (167 passed, 5 skipped)
+uv run pytest -q                  # full suite (382 passed, 5 skipped)
 openspec list --json              # active OpenSpec changes
 openspec --version                # CLI version
 ```
@@ -38,7 +38,7 @@ openspec --version                # CLI version
 
 **OptiPilot** is the working name (appears only in `pyproject.toml` and `.idea/optipilot.iml`; there is no README) of an academic software project whose goal is the **"Reto 1" of a computer-vision course at Universidad de Caldas**: the *brain* of an autonomous line-following robot that uses a camera, classical image processing only, and must react to two traffic signs (red octagon = **PARE** / stop; green octagon = **SIGA** / go).
 
-**Current reality (do not skip):** the repository contains **a working, tested implementation** of the vision pipeline, the deterministic state machine, run metrics, a validation CLI, and 167 automated tests. What does **not** exist yet: the annotated reference corpus needed to score SC-010, the teacher's stop duration, any hardware/actuator interface, and the poster.
+**Current reality (do not skip):** the repository contains **a working, tested implementation** of the vision pipeline, the deterministic state machine, run metrics, a validation CLI, trajectory control, the safety compositor, and 382 automated tests. What does **not** exist yet: the annotated reference corpus needed to score SC-010, the teacher's stop duration, the actuator wiring (`ColaTransporte`/`TransporteSimulado`), and the poster.
 
 **Status snapshot**
 
@@ -48,13 +48,15 @@ openspec --version                # CLI version
 | CV pipeline (preprocess → segment → candidates → confirm) | **Implemented** | `src/vision/{preprocesamiento,segmentacion,candidatos,deteccion,pipeline}.py` |
 | Deterministic FSM (PARE stops, SIGA resumes) | **Implemented** | `src/vision/maquina_estados.py` |
 | Run metrics + visualization + validation CLI | **Implemented** | `src/vision/metricas.py`, `visualizacion.py`, `src/main.py` |
-| Tests | **Present** — 167 passing (92 unit, 75 integration) | `tests/unit/`, `tests/integration/` |
+| Tests | **Present** — 382 passing (307 unit, 75 integration) | `tests/unit/`, `tests/integration/` |
 | Reference annotation corpus (SC-010 ground truth) | **Absent** — required by `contracts/anotacion-referencia.md` §2 | no `anotacion_linea.json` in the repo |
 | Real footage | **Absent in this copy** — was never tracked (`.gitignore:180` ignores `videos/`); 9 portrait 478×850 videos documented but not present | no `documents/videos/` on disk |
 | Signal detection on real footage | **Not demonstrated** — 0 confirmations observed | see §27 |
+| Bluetooth link to the mBot (US4) | **Partially implemented** — `TransporteSPP` sends one ASCII byte over RFCOMM; never run against real hardware | `src/transporte/spp.py` |
+| `ColaTransporte` / `TransporteSimulado` | **Absent** — T027, T028, T030 pending | no `src/transporte/{cola,simulado}.py` |
 | CI/CD for the product | Absent; 1 generated Copilot-setup workflow | `.github/workflows/copilot-setup-steps.yml` |
-| Python environment | Complete: CPython 3.14 + OpenCV + NumPy + pytest | `.venv/`, `pyproject.toml` |
-| Git | Work delivered on branch `dev`; `origin/main` still at Fase 2 | `git log`, `git branch -av` |
+| Python environment | Complete: CPython 3.14 + OpenCV + NumPy + pytest, **zero third-party deps for the robot link** | `.venv/`, `pyproject.toml` |
+| Git | Feature 002 on `feature/002-control-trayectoria`; `main`/`dev` still at Fase 2 | `git log`, `git branch -av` |
 
 ---
 
@@ -126,7 +128,7 @@ Sources (equivalent content; verified line-by-line against each other): `documen
 Classification of everything in the repo (the distinction between documentation and implementation is critical here):
 
 **Implemented**
-- Git repository; work delivered on branch `dev` (`origin/main` remains at Fase 2).
+- Git repository; feature 002 work on branch `feature/002-control-trayectoria` (`origin/main` remains at Fase 2).
 - PyCharm project files (`.idea/**`).
 - Spec Kit installation (`.specify/**`, 21 tracked files) — the tool that produced `specs/**`.
 - OpenSpec initialization (`openspec/config.yaml`; `specs/` and `changes/archive/` empty with `.gitkeep`).
@@ -139,14 +141,19 @@ Classification of everything in the repo (the distinction between documentation 
   - `deteccion.py` — temporal confirmation (N=3) with tolerance K=2 and re-arm (T012).
   - `pipeline.py` — orchestration, degradation, per-stage diagnostics (T013).
   - `maquina_estados.py` — deterministic FSM; PARE stops, SIGA resumes (T018).
+  - `posicion_linea.py` — `EstimadorLinea`: lateral line position, band, dominant peak, anticipation; **consumes `mascara_linea`** (002/US1).
+  - `control_trayectoria.py` — bang-bang with hysteresis, recovery, safe fallback (002/US2-3).
+  - `compositor.py` — 3-level safety arbitration; FSM veto always ⟹ `DETENER` (T025).
   - `metricas.py` / `visualizacion.py` — run metrics and annotated frames (T020–T021).
+- **Transport link** in `src/transporte/`: `base.py` (`Protocol Transporte`, no I/O) and `spp.py` (`TransporteSPP`, one ASCII byte per command over RFCOMM; the only file that opens a socket). `ColaTransporte`/`TransporteSimulado` are still absent.
 - Configuration in `config/vision.json`, validated on load by `configuracion.py`.
 - Validation CLI `src/main.py` (`--fuente`, `--config`, `--diagnostico`, `--salida`, `--max-fotogramas`, `--anotacion`).
-- 167 automated tests: 92 unit (`tests/unit/`) + 75 integration (`tests/integration/`).
+- 382 automated tests: 307 unit (`tests/unit/`) + 75 integration (`tests/integration/`).
 
 **Documented but NOT implemented** (the robot/actuator boundary)
 - Any camera capture on the real robot (the CLI opens files/indices; the camera is untested).
 - Motor/actuator control: the FSM emits `DecisionMovimiento` *verdicts*, nothing drives wheels.
+- `ColaTransporte` / `TransporteSimulado`: the transport is byte-level and tested, but nothing yet decouples the vision loop from the radio (T027/T028/T030).
 - The annotated reference corpus (`anotacion_linea.json` + PNG masks) for SC-010.
 - The poster / visual material.
 - PARE stop duration is provisional (`t_parada_s: 3.0`), pending the teacher's value.
@@ -215,7 +222,7 @@ Missing on purpose/absence: no `README*`, no `LICENSE`, no `CONTRIBUTING`, no pr
 |-------|----------------------|----------|
 | Language | Python — declared `>=3.14` | `pyproject.toml` → `requires-python` |
 | Local runtime | CPython **3.14.7**, uv-managed venv | `.venv/pyvenv.cfg`, `.venv/Scripts/python.exe --version` |
-| Dependency management | Declared: `numpy>=2.4`, `opencv-python-headless>=4.13`; dev group: `pytest>=8` | `pyproject.toml` |
+| Dependency management | Declared: `numpy>=2.4`, `opencv-python-headless>=4.13`; dev group: `pytest>=8`. `pyserial` was added then **removed** within the same day when the real protocol turned out to be RFCOMM | `pyproject.toml`, `uv.lock` |
 | Computer vision | **OpenCV** (`opencv-python-headless`) — `cvtColor`, `inRange`, `morphologyEx`, `findContours`, `approxPolyDP`, `arcLength`, `boundingRect`, `VideoCapture`, `imwrite` | `src/vision/**`, `src/main.py` |
 | Numerics | NumPy — masks as boolean/uint8 arrays, ROI boolean algebra | `src/vision/**` |
 | Tests | pytest with two custom markers: `footage` (opt-in real video) and `perf` (benchmark) | `pyproject.toml` → `[tool.pytest.ini_options]` |
@@ -230,7 +237,7 @@ No build system beyond setuptools defaults; no formatter/linter configured (see 
 
 ## 8. Architecture and Application Flow
 
-**Actual architecture: a linear stage pipeline, not a layered one.** `src/vision/` is the real package; its modules correspond one-to-one to the stages of Reto 1 and are wired in order by `PipelineVision`. `src/models/` and `src/services/` remain 0-byte package markers and are **not** part of the design.
+**Actual architecture: a linear stage pipeline, not a layered one.** `src/vision/` is the real package; its modules correspond one-to-one to the stages of Reto 1 and are wired in order by `PipelineVision`. `src/transporte/` is a second, deliberately separate package: it is the only place allowed to touch the network. `src/models/` and `src/services/` remain 0-byte package markers and are **not** part of the design.
 
 **Actual application flow: implemented as a validation CLI, not as a robot controller.** The stages run per frame:
 
@@ -331,11 +338,39 @@ The rubric makes violating this a **"No cumple"** in *Cumplimiento de las restri
 | `src/vision/metricas.py` | `MetricasCorrida` — events, decisions, timings, `Referencia` scoring | **Implemented** (T020) |
 | `src/vision/visualizacion.py` | Annotated frames per stage (SC-012) | **Implemented** (T021) |
 | `src/vision/configuracion.py` | `ParametrosConfiguracion`, `RangoHSV`, `RectanguloNormalizado`, load-time validation | **Implemented** (T008) |
-| `src/vision/modelos.py` | Shared dataclasses/enums: `EstadoRobot`, `PermisoMovimiento`, `ClaseSenal`, `EventoDeteccion` | **Implemented** |
+| `src/vision/posicion_linea.py` | `EstimadorLinea.aplicar` — band, dominant peak, anticipation fraction | **Implemented** (T013) |
+| `src/vision/control_trayectoria.py` | `ControlTrayectoria.decidir` — bang-bang with hysteresis, recovery, safe fallback | **Implemented** (T017) |
+| `src/vision/compositor.py` | `componer` — 3-level safety arbitration; FSM veto always ⟹ `DETENER` | **Implemented** (T025) |
+| `src/vision/modelos.py` | Shared dataclasses/enums: `EstadoRobot`, `PermisoMovimiento`, `ClaseSenal`, `EventoDeteccion`, plus the 002 control block | **Implemented** |
+| `src/transporte/base.py` | `Protocol Transporte` (no I/O): `enviar`, `cerrar`, `conectado`, `ultimo_error` | **Implemented** (T030 prerequisite) |
+| `src/transporte/spp.py` | `TransporteSPP` — **the only file in the project that opens a socket**; one ASCII byte per command over RFCOMM | **Implemented** (T029) |
 | `src/models/__init__.py` | empty | package marker; **not** an architecture layer |
 | `src/services/__init__.py` | empty | package marker; **not** an architecture layer |
 
 Entry point: `python -m src.main --fuente <ruta>`.
+
+### 12.1 Robot link — the protocol the professor confirmed (2026-09-28)
+
+The wire protocol **supersedes** the team's earlier design. The professor sent example
+`Robot.py` code; the earlier 4-byte framed protocol with an XOR checksum over a
+serial `COM` port was our own invention and is gone.
+
+| Command | Byte | Meaning |
+|---------|------|---------|
+| `AVANZAR` | `w` (0x77) | go straight |
+| `IZQUIERDA` | `a` (0x61) | line is on the left |
+| `DERECHA` | `d` (0x64) | line is on the right |
+| `DETENER` | `x` (0x78) | stop |
+
+One byte per command, no header, no checksum, no delimiter. The link is
+`socket.AF_BLUETOOTH` + `SOCK_STREAM` + `BTPROTO_RFCOMM`, channel 1, to
+`mac_bluetooth` (default `00:1B:10:21:2C:1B`). `pyserial` was **removed** from
+`pyproject.toml`; the robot link now has **zero** third-party dependencies.
+
+**Unverified assumption:** exactly one byte with no trailing newline, which fits a
+receiver doing `recv(1)`. `Robot.py` is not in this repository, so this could not
+be checked against the source. If the receiver expects a line terminator, the fix is
+one constant (`SUFIJO` in `src/transporte/spp.py`). Tracked as open question P3.
 
 ---
 
@@ -388,7 +423,7 @@ All four are **class materials authored for Google Colab** (embedded outputs and
   testpaths = ["tests"]
   markers = ["footage: ...", "perf: ..."]
   ```
-- **`config/vision.json`**: the runtime configuration consumed by `configuracion.py` — both ROIs, the HSV ranges for line/red/green, morphology kernel, area minimum, `n_confirmacion`/`k_tolerancia`/`x_rearme`, `t_parada_s`, the latency budget, and the shape filters (`vertices_objetivo`, `tolerancia_vertices`, `aspecto_min`/`aspecto_max`). Loaded and validated on every run; a malformed value raises `ConfiguracionInvalidaError`.
+- **`config/vision.json`**: the runtime configuration consumed by `configuracion.py` — both ROIs, the HSV ranges for line/red/green, morphology kernel, area minimum, `n_confirmacion`/`k_tolerancia`/`x_rearme`, `t_parada_s`, the latency budget, the shape filters (`vertices_objetivo`, `tolerancia_vertices`, `aspecto_min`/`aspecto_max`), and the control block: `x_objetivo`, `frac_anticipacion`, `frac_pico`, `umbral_confianza`, `zona_muerta`, `histerecis`, `n_gracia_busqueda`, `mac_bluetooth`, `timeout_transporte_s`. Loaded and validated on every run; a malformed value raises `ConfiguracionInvalidaError`. V5 validates the MAC format `XX:XX:XX:XX:XX:XX`; V6 validates the transport timeout.
 - **`openspec/config.yaml`**: `schema: spec-driven`; `githubCopilot.cloudAgent: true`. Everything else (context, rules, operations) is **commented-out examples only** — the project has not filled in its OpenSpec context yet. This is the natural place to declare project context for OpenSpec workflows (a change, if done).
 - **`.gitignore`**: Toptal "python" template. Ignores `.venv`, `.env`, `__pycache__/`, `.ipynb_checkpoints`, `.ruff_cache/`, `pyrightconfig.json`, coverage artefacts, etc. `.idea/` is **not** ignored (the line is commented) and IDE files are deliberately tracked, except `.idea/workspace.xml` which is excluded by `.idea/.gitignore`.
 - **No `.env`.** The only environment variable the project reads is `OPTIPILOT_VIDEO_DIR`, and only in the `footage`-marked test (T027); there is no dotenv machinery. If a future stage needs env vars for the product itself, that is a new decision — document it. `uv.lock` **does** exist and is committed, so the environment is reproducible with `uv sync`.
@@ -431,7 +466,7 @@ Changed together (config + code default + tests must stay in sync):
 | Purpose | Command | Source of truth |
 |---|---|---|
 | Sync the environment from the manifest | `uv sync` | `pyproject.toml` |
-| Full test suite | `uv run pytest -q` | verified: **167 passed, 5 skipped** |
+| Full test suite | `uv run pytest -q` | verified: **382 passed, 5 skipped** |
 | Unit tests only | `uv run pytest tests/unit -q` | verified |
 | Integration tests only | `uv run pytest tests/integration -q` | verified |
 | Run with real footage (opt-in) | `OPTIPILOT_VIDEO_DIR=<dir> uv run pytest -m footage` | `tests/integration/test_footage_linea.py` |
@@ -450,8 +485,8 @@ Changed together (config + code default + tests must stay in sync):
 
 ## 18. Testing
 
-- **167 tests pass** (92 unit + 75 integration) plus 5 opt-in skips. Command: `uv run pytest -q`.
-- Layout: `tests/unit/` (6 files, pure logic — no image fixtures), `tests/integration/` (5 files + `_escenarios.py` helper that replays the production loop `PipelineVision → MaquinaEstados`).
+- **382 tests pass** (307 unit + 75 integration) plus 5 opt-in skips. Command: `uv run pytest -q`.
+- Layout: `tests/unit/` (9 files, pure logic — no image fixtures), `tests/integration/` (5 files + `_escenarios.py` helper that replays the production loop `PipelineVision → MaquinaEstados`).
 - Shared synthetic frame generator: `tests/fixtures/generador_sintetico.py` (background, vertical line, octagons, gaussian noise). Fixtures were written to draw 640×480 landscape frames, matching the documented target resolution — the real footage (478×850 portrait, absent in this copy; §27.14) would exercise **different geometries**.
 - Two custom markers in `pyproject.toml`:
   - `footage` — opt-in real-video validation. Requires `OPTIPILOT_VIDEO_DIR`; **skips cleanly** when unset or when the corpus has no `anotacion_linea.json` (T027). The line-IoU path has therefore been exercised against a synthetic annotated corpus, not yet against real annotation.
@@ -546,9 +581,9 @@ The repo ships four synchronized trees of OpenSpec-generated instruction files, 
 
 Given the current state (pipeline implemented, actuator boundary open), the real impact map is about *where change lands*:
 
-- Touching **`src/vision/`** → you are changing the deployed behavior that the 167 tests measure; any edit must map to an allowed technique (§10), stay explainable (§4 criteria 5 & 9), and keep `tests/unit/` + `tests/integration/` green. Changing `roi_linea`, `rango_hsv_linea` or the shape filters alters SC-010 and SC-001/002/003 simultaneously.
+- Touching **`src/vision/`** → you are changing the deployed behavior that the 382 tests measure; any edit must map to an allowed technique (§10), stay explainable (§4 criteria 5 & 9), and keep `tests/unit/` + `tests/integration/` green. Changing `roi_linea`, `rango_hsv_linea` or the shape filters alters SC-010 and SC-001/002/003 simultaneously.
 - Touching **`src/vision/configuracion.py`** or **`config/vision.json`** → every test that builds `ParametrosConfiguracion` is affected; validation happens at load time and a malformed value raises.
-- Adding a **dependency** → update `pyproject.toml [project].dependencies`; note the env is uv-managed and **there is no lockfile**; a new dep must be a classical-CV library, never a learned model (§11).
+- Adding a **dependency** → update `pyproject.toml [project].dependencies`; the env is uv-managed and `uv.lock` is versioned, so run `uv sync` after the change; a new dep must be a classical-CV library, never a learned model (§11). Note the robot link needs **no** third-party dependency today (standard-library `socket`).
 - Touching **`documents/**`** → you are editing the academic source of truth (originals + transcriptions). Prefer appending corrections; never silently rewrite.
 - Touching **agent trees** → regenerate, don't hand-edit (§22); remember all 4 trees move together.
 - Touching **`openspec/config.yaml`** or the schema → affects every opsx workflow; treat as a change itself.
@@ -602,7 +637,7 @@ Given the current state (pipeline implemented, actuator boundary open), the real
 
 Recorded during the audit; each item is factual with evidence:
 
-1. **Documentation vs code:** Reto 1 describes a complete real-time autonomous system; the codebase is a scaffold with a sample script. The gap is total, not partial. **RESOLVED by Fases 3–6**: the pipeline, FSM, metrics, CLI and 167 tests now exist; what remains missing is the actuator boundary and the poster.
+1. **Documentation vs code:** Reto 1 describes a complete real-time autonomous system; the codebase is a scaffold with a sample script. The gap is total, not partial. **RESOLVED by Fases 3–7 and feature 002**: the pipeline, FSM, metrics, CLI, trajectory control, compositor and 382 tests now exist; what remains missing is the actuator wiring, `ColaTransporte`/`TransporteSimulado`, and the poster.
 2. **Empty packages with architectural names:** `src/models/`, `src/services/` exist but contain nothing; the names imply an architecture that has not been designed anywhere. **STILL TRUE** — the real code lives in `src/vision/`; the two folders remain 0-byte markers.
 3. **Environment vs materials:** the class notebooks require `cv2` (+ `sklearn` in nb4); `.venv` has `sklearn` but **not** `cv2`, and `pyproject.toml` declares no dependencies — the local environment cannot run the materials, and is not reproducible from the repo. **PARTLY RESOLVED**: `opencv-python-headless` is now declared and installed, so the notebooks run; and `uv.lock` is committed, so the environment is reproducible with `uv sync`.
 4. **Stored notebook failure:** `4_Kmeans_Imagenes.ipynb`'s last execution crashed with `ModuleNotFoundError: No module named 'google.colab'` (Colab-only import) — the notebook was last run in the wrong environment. **STILL TRUE in the file** (historical artifact, not a project blocker).
@@ -621,12 +656,18 @@ Recorded during the audit; each item is factual with evidence:
 12. **Line mask is not IoU-ready:** `rango_hsv_linea` (`v_max: 110`) lights up ~55-99 % of the line ROI on real footage, and the contract's reference is a ~3 px centre line. The theoretical IoU ceiling is `3/W`, so a mask wider than 5 px **cannot** reach SC-010's 0.60 threshold. Measured 0.125 against a synthetic 3 px reference. Any future SC-010 work must first decide the annotation thickness vs. predicted width. **Resolved for geometry on 2026-09-28:** `roi_linea` was recalibrated from `y=0.55` to `y=0.10` (see §16.1); occupancy of the ROI dropped from a 54.7 % median (334 px runs) to 13.3 % (71 px runs). Thickness remains open.
 13. **Fixture geometry differs from footage:** synthetic frames are 640×480 landscape; the real videos are 478×850 portrait. Integration tests therefore do not exercise the geometry they will be judged on.
 14. **The practice footage is present but untracked:** the 9 videos live in `videos/desarrilamiento/` (5) and `videos/rutaIdeal/` (4), **not** in `documents/videos/`; they were re-obtained locally on 2026-09-28 and are deliberately **not versioned** — `.gitignore:180` ignores `videos/` (verified with `git check-ignore`). They are 478×850 portrait, 2730 frames total. Anyone cloning the repo will not have them; re-verify §27.11–27.13 locally before repeating any claim about "the 9 real videos".
+15. **Transport protocol superseded, uncommitted (2026-09-28).** The professor's `Robot.py` fixed the actual link: one ASCII byte per command (`w`/`a`/`d`/`x`) over `socket.AF_BLUETOOTH` + `BTPROTO_RFCOMM`, not the team's earlier 4-byte frame with an XOR checksum over `pyserial`/`COM`. `pyserial` was removed from `pyproject.toml` and `uv.lock`, so the robot link now has **zero** third-party dependencies. `src/transporte/spp.py` and `src/vision/compositor.py` are **new and untracked**; the 002 spec was rewritten to match (see `research.md` Decisión 7, where the old design is preserved as SUPERSEDED). `Robot.py` itself is **not in the repo**, so the framing assumption (one byte, no newline) is unverified — open question P3.
+16. **`componer` signature was wrong in the contract (found while writing T024).** `contracts/api-control.md` §3 declared `componer(decision, movimiento)`, which cannot build `DecisionCompuesta` because that dataclass also requires `posicion` and `permitido`. The real signature takes three arguments; the contract was corrected on 2026-09-28.
+17. **`CausaComando.VETO_FSM` is a reserved value (found while writing T024).** It describes a decision of the *compositor*, so the trajectory controller must never emit it; `DecisionCompuesta` enforces this by rejecting `VETO_FSM` paired with any command other than `DETENER`. Tests must exclude it when enumerating "causes the control can propose". Consequence for the poster/metrics: the two stop reasons stay distinguishable — `PERDIDA_SIN_MEMORIA`/`GRACIA_AGOTADA`/`FALLO_SEGURO` (control) vs `VETO_FSM` (PARE).
+18. **`ColaTransporte` / `TransporteSimulado` remain unimplemented (T027, T028, T030).** The byte-level transport (`TransporteSPP`) and its tests exist, but nothing yet decouples the vision loop from the radio; SC-005 (the loop never blocks) is therefore not yet demonstrated in code, only in the contract.
+19. **Feature 001 docs drifted from the recalibrated ROI (recorded, not fixed).** `specs/001-cv-sign-detection/data-model.md` still documents `roi_linea.y = 0.55`, obsolete since the recalibration to `0.10` (commit `7f0990c`, §16.1). 001 is frozen; the conflict is recorded here by Principle VI rather than editing 001. Also note the 001 checklist `plan-tecnico.md` CHK035 ("line mask has no consumer") was **closed by feature 002** on 2026-09-28: `src/vision/posicion_linea.py` consumes `mascara_linea`.
+20. **AGENTS.md itself carried a wrong module name (corrected 2026-09-28).** Earlier passes listed `src/vision/estimador_linea.py`; the module on disk is **`src/vision/posicion_linea.py`** (class `EstimadorLinea`). Found while doing T043/T044. Lesson already in the file's own §29: verify names against disk.
 
 ---
 
 ## 28. Known Limitations / Undetermined Items
 
-- No robot/hardware documentation: actuator interface, camera access (OpenCV `VideoCapture` index, ROS, serial, etc.) — all undetermined; do not assume.
+- No robot/hardware documentation: actuator interface, camera access (OpenCV `VideoCapture` index, ROS, serial, etc.) — all undetermined; do not assume. The transport link is now known at the byte level (RFCOMM, `w`/`a`/`d`/`x`) but the mBot's real MAC and whether it expects a line terminator are **not** confirmed.
 - No specification of the track, sign placement/size, lighting conditions — only the external practice-videos link.
 - PARE stop duration and "intentos" (attempts) count are teacher-defined and absent here.
 - The annotated reference corpus (SC-010) does not exist, so SC-001/002/003/010 are **not evaluable**; T027 skips cleanly rather than reporting a number.

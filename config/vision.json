@@ -27,7 +27,6 @@
   "zona_muerta": 0.10,
   "histeresis": 0.03,
   "n_gracia_busqueda": 5,
-  "puerto_serial": null,
-  "baudrate": 9600,
-  "timeout_serial_s": 0.20
+  "mac_bluetooth": "00:1B:10:21:2C:1B",
+  "timeout_transporte_s": 0.20
 }

@@ -10,6 +10,7 @@ aparece en el JSON conserva el valor por defecto.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -110,10 +111,19 @@ HISTERESIS_POR_DEFECTO = 0.03
 # llega en el fotograma N+1. Medido: 52.1 px/fotograma de velocidad de error en
 # desarrilamiento frente a 14.5–20.0 en rutaIdeal.
 N_GRACIA_BUSQUEDA_POR_DEFECTO = 5
-# `None` = transporte simulado, el default para que el CLI funcione sin robot.
-PUERTO_SERIAL_POR_DEFECTO: str | None = None
-BAUDRATE_POR_DEFECTO = 9600
-TIMEOUT_SERIAL_S_POR_DEFECTO = 0.20
+# Dirección MAC del mBot, receptor Bluetooth Classic. El valor por defecto es el
+# queLayó el profesor; si el equipo tiene más de un mBot se cambia aquí. La
+# elección entre transporte real y simulado la hace el flag `--transporte` del
+# CLI, no la presencia de un valor en la configuración.
+MAC_BLUETOOTH_POR_DEFECTO = "00:1B:10:21:2C:1B"
+# Cota superior de una escritura bloqueada en el socket (antes `timeout_serial_s`,
+# renombrado porque ya no hay puerto serie: es un socket RFCOMM).
+TIMEOUT_TRANSPORTE_S_POR_DEFECTO = 0.20
+
+# V5: seis pares hexadecimales separados por dos puntos. Se valida al cargar la
+# configuración para que una MAC mal escrita falle en el arranque y no se
+# descubra como un `sendall` que no llega a nadie.
+_MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$")
 
 _RECT_CLAVES = ("x", "y", "w", "h")
 _RANGO_CLAVES = ("h_min", "h_max", "s_min", "s_max", "v_min", "v_max")
@@ -143,9 +153,8 @@ _CAMPOS_CONOCIDOS = frozenset(
         "zona_muerta",
         "histeresis",
         "n_gracia_busqueda",
-        "puerto_serial",
-        "baudrate",
-        "timeout_serial_s",
+        "mac_bluetooth",
+        "timeout_transporte_s",
     }
 )
 
@@ -180,9 +189,8 @@ class ParametrosConfiguracion:
     zona_muerta: float = ZONA_MUERTA_POR_DEFECTO
     histeresis: float = HISTERESIS_POR_DEFECTO
     n_gracia_busqueda: int = N_GRACIA_BUSQUEDA_POR_DEFECTO
-    puerto_serial: str | None = PUERTO_SERIAL_POR_DEFECTO
-    baudrate: int = BAUDRATE_POR_DEFECTO
-    timeout_serial_s: float = TIMEOUT_SERIAL_S_POR_DEFECTO
+    mac_bluetooth: str = MAC_BLUETOOTH_POR_DEFECTO
+    timeout_transporte_s: float = TIMEOUT_TRANSPORTE_S_POR_DEFECTO
 
     def __post_init__(self) -> None:
         _validar(self)
@@ -292,17 +300,15 @@ def _validar_control(p: ParametrosConfiguracion) -> None:
             "n_gracia_busqueda",
             "debe ser >= 0 (0 significa DETENER inmediato tras perder la línea)",
         )
-    if p.puerto_serial is not None and not str(p.puerto_serial).strip():
+    if not _MAC_RE.fullmatch(p.mac_bluetooth):
         raise ConfiguracionInvalidaError(
-            "puerto_serial", "debe ser un puerto no vacío o null (transporte simulado)"
+            "mac_bluetooth",
+            "debe ser una dirección MAC con 6 pares hexadecimales separados "
+            "por dos puntos, p. ej. 00:1B:10:21:2C:1B",
         )
-    # V5: por debajo de 1200 baudios la trama de 4 bytes no es fiable con un
-    # ATmega a 16 MHz.
-    if p.baudrate < 1200:
-        raise ConfiguracionInvalidaError("baudrate", "debe ser >= 1200")
-    # V6: con 0 el puerto quedaría en modo bloqueante infinito.
-    if p.timeout_serial_s <= 0.0:
-        raise ConfiguracionInvalidaError("timeout_serial_s", "debe ser > 0")
+    # V6: con 0 el socket quedaría en modo bloqueante infinito.
+    if p.timeout_transporte_s <= 0.0:
+        raise ConfiguracionInvalidaError("timeout_transporte_s", "debe ser > 0")
 
 
 def _validar_rectangulo(campo: str, rectangulo: RectanguloNormalizado) -> None:
@@ -430,15 +436,18 @@ def _leer_numero(datos: Mapping[str, Any], campo: str, defecto: float) -> float:
     return _como_numero(campo, datos[campo])
 
 
-def _leer_texto_opcional(datos: Mapping[str, Any], campo: str, defecto: str | None) -> str | None:
-    """Lee un campo de texto que admite ``null`` (p. ej. ``puerto_serial``)."""
+def _leer_texto(datos: Mapping[str, Any], campo: str, defecto: str) -> str:
+    """Lee un campo de texto obligatorio. Un ``null`` es un error, no un default.
+
+    Para ``mac_bluetooth`` no tiene sentido el ``null`` que sí tenía
+    ``puerto_serial``: la dirección del mBot no es opcional, y una MAC ausente se
+    detecta al no poder conectar, no al cargar el JSON.
+    """
     if campo not in datos:
         return defecto
     bruto = datos[campo]
-    if bruto is None:
-        return None
     if not isinstance(bruto, str):
-        raise ConfiguracionInvalidaError(campo, "debe ser una cadena o null")
+        raise ConfiguracionInvalidaError(campo, "debe ser una cadena")
     return bruto
 
 
@@ -480,10 +489,9 @@ def _fusionar(datos: Mapping[str, Any]) -> ParametrosConfiguracion:
         n_gracia_busqueda=_leer_entero(
             datos, "n_gracia_busqueda", defecto.n_gracia_busqueda
         ),
-        puerto_serial=_leer_texto_opcional(datos, "puerto_serial", defecto.puerto_serial),
-        baudrate=_leer_entero(datos, "baudrate", defecto.baudrate),
-        timeout_serial_s=_leer_numero(
-            datos, "timeout_serial_s", defecto.timeout_serial_s
+    mac_bluetooth=_leer_texto(datos, "mac_bluetooth", defecto.mac_bluetooth),
+    timeout_transporte_s=_leer_numero(
+        datos, "timeout_transporte_s", defecto.timeout_transporte_s
         ),
     )
 

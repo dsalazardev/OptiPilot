@@ -41,14 +41,14 @@ Leyenda: ✅ artifact existe y trazable · ⬜ pendiente de implementar
 | FR-025 | `DETENER` es el fallo seguro por defecto | `api-control.md` Q8 | T021 | T019 | ⬜ |
 | FR-026 | `DecisionMovimiento` sin modificar | `research.md` Dec. 5 | T025 | T024 + suite 001 | ⬜ |
 | FR-027 | Causa registrada en cada comando | `data-model.md` §6 | T025 | T024 | ⬜ |
-| FR-028 | Bluetooth Classic SPP con `pyserial` | `transporte-bluetooth.md` §1 | T002, T029 | T026 | ⬜ |
-| FR-029 | `pyserial` declarada antes de importar | `plan.md` Impacto | T002 | T047 | ⬜ |
+| FR-028 | Bluetooth Classic SPP por socket RFCOMM de la estándar, canal 1 | `transporte-bluetooth.md` §1, §4 | T029 | T026 | ⬜ |
+| FR-029 | Sin dependencia de terceros para el transporte | `plan.md` Impacto; `research.md` Dec. 7 | T002 | T047 | ⬜ |
 | FR-030 | Interfaz de transporte delgada | `transporte-bluetooth.md` §4 | T009 | T026 | ⬜ |
 | FR-031 | Envío no bloqueante | `transporte-bluetooth.md` §5 | T030, T031 | T031 | ⬜ |
 | FR-032 | Deduplicación de comandos idénticos | `transporte-bluetooth.md` T11 | T030 | T027 | ⬜ |
 | FR-033 | Simulador para pruebas headless | `transporte-bluetooth.md` §6 | T028 | T026, T027 | ⬜ |
 | FR-034 | Fallo sin excepción ni cambio de decisión | `transporte-bluetooth.md` §7 | T029 | T026, T027 | ⬜ |
-| FR-035 | Trama documentada y verificable | `mapa-comandos.md` §1 | T029 | T026 | ⬜ |
+| FR-035 | Byte único y tabla de bytes documentados | `mapa-comandos.md` §1; `transporte-bluetooth.md` §2, §3 | T029 | T026 | ⬜ |
 | FR-036 | Métricas por corrida | `data-model.md` §10 | T032 | T038 | ⬜ |
 | FR-037 | Evidencia visual por comando | `mapa-comandos.md` §6 | T034 | `quickstart.md` §6 | ⬜ |
 | FR-038 | Parámetros centralizados y documentados | `esquema-configuracion.md` §1 | T006 | T008 | ⬜ |
@@ -73,7 +73,7 @@ Leyenda: ✅ artifact existe y trazable · ⬜ pendiente de implementar
 |-----------|---------------|--------|
 | I. Visión clásica, sin auto-detección | `plan.md` Constitution Check; `research.md` Dec. 1 | ✅ PASS (T012, T047 verifican en código) |
 | II. Pipeline por etapas, sin capas especulativas | `plan.md` Structure Decision | ✅ PASS — `src/transporte/` con responsabilidad real; `src/models/` y `src/services/` **siguen vacíos** |
-| III. Dependencias declaradas y reproducibles | `plan.md` Impacto; `pyproject.toml` | ✅ PASS (T002) |
+| III. Dependencias declaradas y reproducibles | `plan.md` Impacto; `research.md` Dec. 7 | ✅ PASS — el transporte no añade dependencia alguna: `socket` es de la biblioteca estándar, así que no hay nada que declarar (T002 quedó superada) |
 | IV. Tiempo real y determinista | `research.md` Dec. 2 y 6 | ✅ PASS — vectorizado, sin azar, envío desacoplado |
 | V. Calidad verificable y evidencia medible | `quickstart.md`; `data-model.md` §10 | ✅ PASS (todas las historias probables sin hardware) |
 | VI. Trazabilidad Spec Kit | Este documento; `plan.md` | ✅ PASS (artefactos en `specs/002-…`, sin uso de OpenSpec) |
@@ -95,6 +95,7 @@ Check y argumentada en `research.md` Decisión 5. Se interpreta que el §II enum
 | `n_gracia_busqueda = 5` | Velocidad de error 52.1 px en desarrilamiento vs 15–20 px en ideal | `research.md` Dec. 4 |
 | Composición con veto de FSM | Un PARE pisado = fallo de seguridad | `research.md` Dec. 5 |
 | `src/transporte/` | §II: la estructura se justifica por el pipeline, no por nombres | `research.md` Dec. 6 |
+| Byte único sobre RFCOMM, sin dependencia de terceros | El profesor confirmó el protocolo junto con su código de ejemplo; desmentía la trama de 4 bytes y el puerto COM | `research.md` Dec. 7 |
 
 ## E. Riesgos abiertos (no cerrables en software)
 
@@ -104,7 +105,8 @@ Check y argumentada en `research.md` Decisión 5. Se interpreta que el §II enum
 | R2 | `x_objetivo = 0.5` provisional | `esquema-configuracion.md` §6 | Recalibrar con footage del robot montado |
 | R3 | Zona muerta calibrada con cámara en mano | `research.md` Dec. 2 | Recalibrar en pista; verificar SC-001 |
 | R4 | `n_gracia_busqueda = 5` sin cinemática del robot | `research.md` Dec. 4 | Ajustar según el tiempo de giro real |
-| P1–P4 | 4 preguntas abiertas del receptor BT | `transporte-bluetooth.md` §8; `AGENTS.md` §27 | Con el docente y el firmware |
+| P1–P5 | 5 preguntas abiertas del receptor BT, incluida la **MAC real del mBot** | `transporte-bluetooth.md` §8; `AGENTS.md` §27 | Con el docente y el firmware |
+| — | Supuesto de un byte sin salto de línea **no verificado** (el `Robot.py` del profesor no está en el repo) | `research.md` Dec. 7; `transporte-bluetooth.md` §2 | En pista o con el robot conectado; si falla, es la constante `SUFIJO` |
 | — | `t_parada_s = 3.0` provisional | Fuera de alcance (decisión del equipo) | Cambio separado |
 | — | `data-model.md` de 001 documenta `roi_linea.y = 0.55` (obsoleto desde `7f0990c`) | T045 | Registrar el conflicto; no editar 001 aquí |
 | — | `roi_linea` anidada dentro de `roi_senales` | `plan.md` Riesgos | No afecta a esta spec (solo usa `mascara_linea`) |
@@ -118,5 +120,5 @@ Check y argumentada en `research.md` Decisión 5. Se interpreta que el §II enum
 ---
 
 **Resumen**: 38/38 FR trazados a diseño, tarea y verificación · 9/9 SC trazados, con SC-001 marcado
-como **criterio de pista** y no de video · 6/6 gates constitucionales en PASS · 8 riesgos abiertos
+como **criterio de pista** y no de video · 6/6 gates constitucionales en PASS · 9 riesgos abiertos
 declarados, ninguno cerrado de forma silenciosa.

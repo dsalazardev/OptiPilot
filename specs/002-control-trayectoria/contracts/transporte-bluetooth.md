@@ -3,7 +3,7 @@
 **Feature**: `specs/002-control-trayectoria` | **Fecha**: 2026-09-28 | **Spec**: [spec.md](../spec.md)
 
 Contrato del canal de comunicación entre el cerebro de visión (nuestra PC) y el robot
-(microcontrolador con módulo Bluetooth Classic tipo HC-05/HC-06). Define el **formato de trama**,
+(microcontrolador con módulo Bluetooth Classic tipo HC-05/HC-06). Define el **formato del mensaje**,
 el comportamiento del enlace y la condición de fallo seguro.
 
 > **Alcance del canal**: es **unidireccional**. Solo enviamos comandos; no leemos sensores, no
@@ -13,67 +13,75 @@ el comportamiento del enlace y la condición de fallo seguro.
 
 ## 1. Justificación de la elección técnica
 
+> **Revisión 2026-09-28 (cambio de protocolo).** El profesor envió el código de ejemplo del mBot
+> (`Robot.py`) y confirmó el canal. Este contrato se reescribió por completo: antes definía una trama
+> de 4 bytes con checksum sobre `pyserial` y un puerto COM; **ninguna de las dos cosas existe ya**.
+> El protocolo real es un byte ASCII por comando sobre un socket RFCOMM.
+
 | Decisión | Elección | Alternativas descartadas |
 |----------|----------|--------------------------|
 | Perfil Bluetooth | **Classic (SPP/RFCOMM)** | BLE/GATT (`bleak`): el microcontrolador no expone un servicio GATT definido por el equipo |
-| Librería | **`pyserial`** | APIs nativas de Windows: más frágiles y menos portables |
-| Capa física | Puerto serie virtual (COM en Windows) | — |
-| Baudrate | **9600** (configurable) | Tasa alta: más bytes por trama sin beneficio; 9600 basta para 4 bytes |
+| Mecanismo | **`socket.AF_BLUETOOTH` + `SOCK_STREAM` + `BTPROTO_RFCOMM`** (biblioteca estándar) | `pyserial` sobre un puerto COM virtual: era la suposición inicial del equipo y queda desmentida por el código del profesor |
+| Capa física | Enlace RFCOMM directo a la MAC del mBot, canal 1 | — |
+| Baudrate | **No aplica**: no hay puerto serie | — |
+| Dependencias | **Ninguna de terceros**: `socket` viene en la estándar | `pyserial`, retirada de `pyproject.toml` y de `uv.lock` |
 
-`pyserial` es un transporte de **propósito general**: no observa imágenes ni toma decisiones de
+`socket` es un transporte de **propósito general**: no observa imágenes ni toma decisiones de
 detección. Su encaje en el Principio III es directo y se documenta en `plan.md`.
 
-**Estructura de la decisión (Principio I / §II)**: la interfaz `Transporte` es propia del equipo y
-define la lógica; `pyserial` solo mueve bytes. El microcontrolador receptor implementa la decodificación
-de tramas por su cuenta (fuera de este repositorio).
+**Ventaja colateral de la revisión**: al no haber trama, desaparece toda una clase de problemas que
+el diseño anterior tenía que resolver (resincronización, checksum, receptor desfasado). El protocolo
+es más pequeño **y** más seguro, porque el estado interno del enlace no puede desfasarse respecto a
+la posición del flujo de bytes.
+
+**Estructura de la decisión (Principio I / §II)**: la interfaz `Transporte` y el mapeo de comandos son
+propios del equipo y definen la lógica; `socket` solo mueve bytes. El microcontrolador receptor
+interpreta las letras por su cuenta (fuera de este repositorio).
 
 ---
 
-## 2. Formato de trama
+## 2. Formato del mensaje
 
-Longitud fija de **4 bytes**. No hay endianness que considerar: son bytes discretos con un orden fijo,
-no campos numéricos multi-byte.
+**Un byte por comando.** No hay trama, ni cabecera, ni longitud, ni payload, ni checksum, ni endianness.
 
-```text
- ┌─────────┬─────────┬─────────┬───────────┐
- │ Header  │ Opcode  │ Payload │ Checksum  │
- │ 0xA5    │ 1 byte  │ 1 byte  │ 1 byte    │
- └─────────┴─────────┴─────────┴───────────┘
-```
-
-| Campo | Bytes | Valor | Propósito |
-|-------|-------|-------|-----------|
-| `Header` | 1 | `0xA5` fijo | Marca de inicio. Permite al receptor resincronizar si pierde el hilo del flujo. |
-| `Opcode` | 1 | ver tabla §3 | Identifica el comando. |
-| `Payload` | 1 | `0x00` reservado | Espacio a futuro sin cambiar el tamaño de trama. |
-| `Checksum` | 1 | XOR de los 3 bytes previos | Detecta corrupción de un solo byte; una trama con checksum incorrecto se descarta. |
-
-**Trama válida** = 4 bytes donde `Header==0xA5` y `Checksum == (Header ^ Opcode ^ Payload)`.
+| Elemento | Valor | Notas |
+|----------|-------|-------|
+| Tamaño | **1 byte** | Longitud fija de 1, sin campos multi-byte |
+| Contenido | Carácter ASCII del comando | Ver tabla §3 |
+| Delimitador | **Ninguno** | Cada `sendall()` es un comando completo y autónomo |
+| Checksum | **Ninguno** | Con un solo byte no hay corrupción multi-byte que detectar |
 
 ### Reglas de decodificación (receptor)
 
-1. Descartar cualquier byte hasta encontrar `0xA5`.
-2. Leer los 3 bytes siguientes como `Opcode`, `Payload`, `Checksum`.
-3. Si `Checksum` no valida, descartar la trama y volver a buscar `Header` (resincronización).
-4. Si `Opcode` no está en la tabla, descartar.
-5. Ejecutar el comando.
+1. Leer un byte.
+2. Compararlo con la tabla §3.
+3. Si no coincide, descartarlo.
+4. Ejecutar el comando.
 
-Estas reglas hacen que el protocolo sea **auto-sincronizable**: una pérdida de bytes no deja al
-receptor ejecutando comandos desfasados.
+El enlace es **auto-sincronizable por construcción**: como cada mensaje es un byte completo e
+independiente, no existe estado interno que pueda quedar desfasado. Un byte perdido se pierde un
+comando, nunca la alineación del flujo.
+
+**Supuesto declarado (no verificado).** Se envía **exactamente un byte, sin salto de línea**, porque
+así funciona un receptor que lee `recv(1)` por comando. El código `Robot.py` del profesor **no está en
+este repositorio**, de modo que esta suposición no pudo comprobarse contra la fuente; si su receptor
+esperase un terminador de línea, el cambio es una constante (`SUFIJO` en `src/transporte/spp.py`) y
+afecta a una sola línea del proyecto. Queda registrado como pregunta abierta P5 (§7).
 
 ---
 
-## 3. Tabla de opcodes (mapa de comandos)
+## 3. Tabla de comandos (mapa de bytes)
 
-| Comando | `Opcode` | Trama completa (hex) | Significado para el robot |
-|---------|----------|----------------------|--------------------------|
-| `AVANZAR` | `0x01` | `A5 01 00 A4` | Avanza recto |
-| `IZQUIERDA` | `0x02` | `A5 02 00 A7` | Corrige hacia la izquierda |
-| `DERECHA` | `0x03` | `A5 03 00 A6` | Corrige hacia la derecha |
-| `DETENER` | `0x04` | `A5 04 00 A1` | Detiene (incluye parada de seguridad) |
+| Comando | Byte | Hex | Significado para el robot |
+|---------|------|-----|--------------------------|
+| `AVANZAR` | `w` | `77` | Avanza recto |
+| `IZQUIERDA` | `a` | `61` | Corrige hacia la izquierda |
+| `DERECHA` | `d` | `64` | Corrige hacia la derecha |
+| `DETENER` | `x` | `78` | Detiene (incluye parada de seguridad) |
 
-Los cuatro checksums se han verificado como `Header ^ Opcode ^ Payload`:
-`0xA5^0x01^0x00 = 0xA4`, `0xA5^0x02^0x00 = 0xA7`, `0xA5^0x03^0x00 = 0xA6`, `0xA5^0x04^0x00 = 0xA1`.
+Los cuatro bytes son distintos y ninguno es un valor de control ni un espacio: no hay ambigüedad
+posible con la configuración del enlace. `DETENER` usa `x` y no `w`, de modo que una parada nunca puede
+confundirse con un avance.
 
 **Tabla ↔ dominio**: esta tabla es la frontera verificable entre la decisión de software y el
 firmware del robot. El póster puede mostrar la tabla completa como "nuestra API hacia el robot"
@@ -95,16 +103,16 @@ class Transporte(Protocol):
 
 | # | Regla |
 |---|------|
-| T1 | Serializa el comando a 4 bytes y los entrega al transporte. |
-| T2 | Devuelve `True` si se encoló/aceptó; `False` si el transporte está cerrado o desconectado. |
-| T3 | **Nunca** lanza excepción por desconexión, timeout o puerto inexistente (FR-034). Cualquier fallo se captura, se registra en `ultimo_error` y se devuelve `False`. |
-| T4 | Es idempotente con el mismo comando consecutively a nivel de `ColaTransporte` (no aquí): la deduplicación vive en la cola, no en el transporte. |
+| T1 | Serializa el comando a **1 byte ASCII** y lo entrega con `sendall()`. |
+| T2 | Devuelve `True` si el socket aceptó el envío; `False` si el enlace está caído o no se pudo abrir. |
+| T3 | **Nunca** lanza excepción por desconexión, timeout o MAC inalcanzable (FR-034). Cualquier fallo se captura, se registra en `ultimo_error` y se devuelve `False`. |
+| T4 | Es idempotente con el mismo comando consecutive a nivel de `ColaTransporte` (no aquí): la deduplicación vive en la cola, no en el transporte. |
 
 ### Semántica de `cerrar`
 
 | # | Regla |
 |---|------|
-| T5 | Cierra el puerto serie y libera el recurso. |
+| T5 | Cierra el socket y libera el recurso. |
 | T6 | Es **idempotente**: llamarla dos veces no falla. |
 | T7 | Tras cerrar, `enviar` devuelve `False` sin lanzar. |
 
@@ -112,23 +120,29 @@ class Transporte(Protocol):
 
 | # | Regla |
 |---|------|
-| T8 | `conectado` es consultable en cualquier momento sin excepción. |
-| T9 | `ultimo_error` devuelve `None` si no hay fallo pendiente, o un mensaje legible. |
+| T8 | `conectado()` es consultable en cualquier momento sin excepción. |
+| T9 | `ultimo_error()` devuelve `None` si no hay fallo pendiente, o un mensaje legible. |
 
 ### Comportamiento de `TransporteSPP` (implementación real)
 
 | Aspecto | Comportamiento |
 |---------|----------------|
-| Puerto | `params.puerto_serial` (p. ej. `"COM5"`), o `None` ⟹ el transporte queda desconectado pero funcional (devuelve `False`, no lanza) |
-| Apertura | `serial.Serial(puerto, baudrate, timeout=params.timeout_serial_s)` en `__init__` o perezosamente en el primer `enviar` |
-| Timeout | `timeout_serial_s` (0.2 s por defecto) para que una escritura bloqueada no congele el proceso |
-| Fallo de apertura | Puerto inexistente o sin permiso: se captura, se registra, `conectado()` queda `False`, `enviar()` devuelve `False` |
-| Reconexión | Tras una desconexión, un `enviar` puede intentar reabrir el puerto (best-effort); si falla, sigue devolviendo `False` sin lanzar |
-| `pyserial` | Se importa **solo** en `src/transporte/spp.py` |
+| Destino | `params.mac_bluetooth` (p. ej. `"00:1B:10:21:2C:1B"`), canal RFCOMM 1 |
+| Apertura | `socket(familia, SOCK_STREAM, BTPROTO_RFCOMM)` + `connect((mac, 1))`, **perezosamente en el primer `enviar`**, nunca en `__init__` |
+| Timeout | `params.timeout_transporte_s` (0.2 s por defecto) para que una escritura bloqueada no congele el proceso |
+| Fallo de apertura | MAC inalcanzable o sin pairing: se captura, se registra, `conectado()` queda `False`, `enviar()` devuelve `False` |
+| Reconexión | Tras una desconexión, el siguiente `enviar` reabre best-effort una vez; si falla, sigue devolviendo `False` sin lanzar |
+| Sin Bluetooth en el SO | Si `socket.AF_BLUETOOTH` no existe (plataforma sin proveedor de Bluetooth), se registra el motivo y `enviar()` devuelve `False`. **No** es una excepción: la suite debe correr en cualquier máquina |
+| Fábrica de sockets | Inyectable, para que los tests ejerciten envío y fallo sin hardware |
+| `serial` | **No se importa en ningún módulo**: el enlace es RFCOMM puro |
 
-**Por qué el timeout importa**: sin él, un módulo BT desconectado puede bloquear el `write` durante
-segundos. Con `timeout_serial_s=0.2`, el peor caso acotado es compatible con el presupuesto de
-tiempo real, y de todos modos la escritura ocurre **fuera** del bucle de visión (`ColaTransporte`).
+**Por qué el timeout importa**: sin él, un enlace caído puede bloquear el `sendall` durante segundos.
+Con `timeout_transporte_s=0.2`, el peor caso acotado es compatible con el presupuesto de tiempo real, y
+de todos modos la escritura ocurre **fuera** del bucle de visión (`ColaTransporte`).
+
+**Por qué la apertura es perezosa**: abrir en `__init__` ataría el fallo de conexión al arranque del
+proceso, y el CLI debe poder arrancar y validar el pipeline **sin** robot. La conexión se hace
+efectivamente en el primer envío.
 
 ---
 
@@ -155,7 +169,7 @@ tiempo real, y de todos modos la escritura ocurre **fuera** del bucle de visión
 | T15 | `pendientes()` permite observar la salud del enlace como métrica (un backlog que crece indica un problema de radio). |
 
 **¿Por qué deduplicar?** El bucle de visión corre a ~30 fps, pero la utilidad de una corrección de
-dirección dura varios fotogramas. Enviar la misma trama 30 veces no aporta nada y consume el enlace.
+dirección dura varios fotogramas. Enviar el mismo byte 30 veces no aporta nada y consume el enlace.
 La deduplicación transmite **solo transiciones de estado**, que es la información útil para el robot.
 
 ---
@@ -178,9 +192,9 @@ desconexión, reconexión, precedencia del veto— sin robot, en CI, en headless
 
 | Fallo | Comportamiento del software | Comando en la radio |
 |-------|------------------------------|---------------------|
-| Puerto no existe | `enviar → False`, `ultimo_error` registrado, bucle sigue | El último comando sigue vigente en el robot (se mantiene hasta nuevo comando) |
+| MAC inalcanzable o sin pairing | `enviar → False`, `ultimo_error` registrado, bucle sigue | El último comando sigue vigente en el robot (se mantiene hasta nuevo comando) |
 | Módulo BT desconectado | Igual que arriba; se intenta reabrir en el siguiente envío | Sin cambio |
-| `write` falla a mitad de trama | Trama incompleta; el receptor la descarta por checksum y resincroniza | Sin cambio parcial |
+| `sendall` falla a mitad | El comando se pierde entero; como no hay estado interno en el protocolo, el receptor no queda desfasado: el siguiente byte es un comando completo | Sin cambio parcial |
 | Escena sin línea y sin memoria | `DETENER` se encola y se transmite | Robot se detiene (fallo seguro) |
 | PARE confirmado | `DETENER` por `VETO_FSM`; ninguna corrección se transmite (SC-007) | Robot se detiene |
 | Excepción interna en el control | `DETENER` + `FALLO_SEGURO` (FR-025) | Robot se detiene |
@@ -199,9 +213,14 @@ suficientes), pero deben resolverse antes de la demostración en pista:
 | # | Pregunta | Por qué importa | Quién decide |
 |---|----------|-----------------|--------------|
 | P1 | ¿El receptor reintenta o el software reintenta? | Afecta a la lógica de `ColaTransporte.drenar` | Equipo + firmware |
-| P2 | ¿Se envía alguna trama de "listo" al arrancar? | El robot podría necesitar un heartbeat para no dormir | Equipo + firmware |
-| P3 | ¿9600 baudios es suficiente para la respuesta mecánica del robot? | Si el giro es lento, la trama de dirección podría llegar tarde | Docente (cinemática) |
+| P2 | ¿Se envía algún byte de "listo" al arrancar? | El robot podría necesitar un heartbeat para no dormir | Equipo + firmware |
+| P3 | ¿El receptor lee `recv(1)` por comando o lee hasta un delimitador? | Si espera un terminador de línea, hay que enviar `SUFIJO` además del byte | Firmware |
 | P4 | ¿Cómo se comporta el robot si recibe `DETENER` repetido? | ¿Idempotente (parar es parar) o re-dispara? | Firmware |
+| P5 | ¿Cuál es la MAC exacta del mBot de pista? | El valor por defecto es una suposición de trabajo, no un dato del docente | Docente |
+
+Sobre **P3**: el código `Robot.py` del profesor no está en este repositorio, así que el supuesto
+"un byte, sin delimitador" no pudo verificarse contra la fuente. El cambio, si hiciera falta, es una
+constante en `src/transporte/spp.py` y no altera el resto del diseño.
 
 Estas preguntas se registran en `AGENTS.md` §27 (vacíos dependientes del docente) según el Principio VI.
 
@@ -211,14 +230,14 @@ Estas preguntas se registran en `AGENTS.md` §27 (vacíos dependientes del docen
 
 | FR | Sección |
 |----|---------|
-| FR-028 (SPP/RFCOMM con `pyserial`) | §1, §4 (`TransporteSPP`) |
-| FR-029 (declarar en `pyproject.toml`) | §1, `plan.md` |
+| FR-028 (SPP/RFCOMM con `socket` de la estándar) | §1, §4 (`TransporteSPP`) |
+| FR-029 (**sin dependencia de terceros**; nada que declarar) | §1, `plan.md` |
 | FR-030 (interfaz delgada) | §4 (`Transporte` Protocol) |
 | FR-031 (no bloqueante) | §5 (`ColaTransporte`), T10, T14 |
 | FR-032 (deduplicar) | §5, T11 |
 | FR-033 (mock para pruebas) | §6 (`TransporteSimulado`) |
 | FR-034 (fallo sin excepción, sin cambiar decisión) | §4 (T3), §7 |
-| FR-035 (documentar trama) | §2, §3 |
+| FR-035 (documentar el formato del mensaje) | §2, §3 |
 | FR-024 (DETENER por veto) | §7, y `api-control.md` §3 |
 | SC-005 (no bloquea el bucle) | §5, T14 |
 | SC-007 (veto siempre DETENER) | §7 |

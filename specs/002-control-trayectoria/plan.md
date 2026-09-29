@@ -20,16 +20,27 @@ CHK035 (la máscara de línea no tenía consumidor funcional):
 Enfoque técnico: módulos Python puros en `src/vision/` siguiendo el patrón de etapas de 001;
 lógica determinista e inyectable para pruebas headless; todo el cálculo de línea basado en
 aritmética sobre la máscara (sin Hough ni detectores automáticos, por el Principio I y §III);
-transporte aislado en `src/transporte/` con simulador por defecto; `pyserial` declarado y usado solo
-en ese paquete.
+transporte aislado en `src/transporte/` con simulador por defecto; enlace RFCOMM implementado solo
+con `socket` de la biblioteca estándar, sin dependencias de terceros.
 
 ## Technical Context
 
 **Language/Version**: Python 3.14.7 (venv gestionado con uv; `requires-python = ">=3.14"`).
 
-**Primary Dependencies**: `opencv-python-headless` ≥ 4.13, NumPy (ya instalados), **`pyserial`**
-(nuevo, declarado en `pyproject.toml` y versionado en `uv.lock`), `pytest` como dependencia de
-desarrollo. Configuración en JSON estándar.
+**Primary Dependencies**: `opencv-python-headless` ≥ 4.13, NumPy (ya instalados), `pytest` como
+dependencia de desarrollo. Configuración en JSON estándar.
+
+**Dependencias del transporte: ninguna.** El enlace hacia el mBot se implementa con un socket RFCOMM
+de la biblioteca estándar (`socket.AF_BLUETOOTH` + `SOCK_STREAM` + `BTPROTO_RFCOMM`) contra el canal
+1 de `mac_bluetooth`, y se escribe con `sendall()`. No hay nada que declarar en `pyproject.toml` ni
+en `uv.lock`.
+
+> **SUPERADA (2026-09-28) — la dependencia `pyserial` de este plan está RETIRADA.** El profesor
+> confirmó el protocolo real junto con su código de ejemplo del mBot: el enlace es RFCOMM puro, no un
+> puerto COM. `pyserial` se eliminó de `pyproject.toml` y de `uv.lock` en lugar de declararse, y los
+> parámetros `puerto_serial` y `baudrate` se sustituyeron por `mac_bluetooth` y
+> `timeout_transporte_s`. La justificación de la decisión antigua queda registrada en `research.md`
+> (Decisión 6, marcada como superada) y en el Constitution Check de abajo.
 
 **Storage**: Sistema de archivos — configuración en `config/vision.json` (se **extiende**, no se
 parte); salidas de diagnóstico y métricas en `salidas/` (ignorado por git); videos de validación en
@@ -56,7 +67,7 @@ determinismo total (sin azar); `src/vision/` **sin I/O**; `t_parada_s` y la sem�
 **intactos**; cuatro comandos discretos, sin velocidad ni duración de giro.
 
 **Scale/Scope**: 1 cámara / 1 flujo; 2 etapas nuevas de visión + 1 de transporte; 4 comandos;
-10 parámetros de configuración nuevos; corpus de validación: los 9 videos de práctica (locales, no
+9 parámetros de configuración nuevos; corpus de validación: los 9 videos de práctica (locales, no
 versionados) + secuencias sintéticas.
 
 ## Constitution Check
@@ -65,9 +76,9 @@ versionados) + secuencias sintéticas.
 
 | Principio | Gate | Estado |
 |-----------|------|--------|
-| I. Restricción Técnica Absoluta: Visión Clásica (NON-NEGOTIABLE) | La posición de línea se calcula **solo** con sumas por columna, umbral de medio pico y media ponderada sobre la máscara — aritmética autorizada, decisión del equipo. **Sin `HoughLinesP`, sin `fitLine`**, sin ninguna dependencia que detecte la línea automáticamente (§III lo prohíbe incluso para "herramientas de visión" convencionales). `pyserial` es transporte de bytes, no de visión. | PASS |
+| I. Restricción Técnica Absoluta: Visión Clásica (NON-NEGOTIABLE) | La posición de línea se calcula **solo** con sumas por columna, umbral de medio pico y media ponderada sobre la máscara — aritmética autorizada, decisión del equipo. **Sin `HoughLinesP`, sin `fitLine`**, sin ninguna dependencia que detecte la línea automáticamente (§III lo prohíbe incluso para "herramientas de visión" convencionales). El enlace Bluetooth es transporte de bytes, no de visión, y no añade ninguna dependencia. | PASS |
 | II. Arquitectura de Pipeline Explícito por Etapas | Dos etapas nuevas con módulo y contrato propios: `posicion_linea.py` y `control_trayectoria.py`, más `compositor.py` como punto de arbitraje explícito. `src/transporte/` se crea **con una responsabilidad real** (transporte de comandos), no por nombre de carpeta. `src/models/` y `src/services/` **siguen vacíos**: la §II exige justificar la estructura por el pipeline. | PASS |
-| III. Organización del Código y Dependencias Reproducibles | `pyserial` se declara en `pyproject.toml` antes de importarse, se instala con uv y se versiona en `uv.lock`. `import serial` **solo** aparece en `src/transporte/spp.py`. Sin secretos ni credenciales. `.venv` no versionado. | PASS |
+| III. Organización del Código y Dependencias Reproducibles | El transporte **no introduce dependencias**: `socket` viene en la biblioteca estándar, así que `pyproject.toml` y `uv.lock` no se modifican por este canal y no hay nada que declarar antes de importar. El `import socket` **solo** aparece en `src/transporte/spp.py`. Sin secretos ni credenciales; la MAC del robot es un parámetro de configuración, no un valor fijo en el código. `.venv` no versionado. | PASS |
 | IV. Tiempo Real y Comportamiento Determinista | Estimador vectorizado (sin bucles por píxel); control determinista sin azar; envío **desacoplado** por `ColaTransporte` (nada de escrituras bloqueantes en el bucle); la pérdida temporal de línea se tolera y se recupera de forma autónoma (memoria del último lado). Todos los umbrales son parámetros configurables. | PASS |
 | V. Calidad Verificable: Pruebas y Evidencia Medible | Cada etapa es headless y determinista; validación contra footage real antes de integrar (§V); métricas de rúbrica (correcciones, pérdidas, recuperaciones, latencia) registradas y exportadas; comando y resultados documentados en este mismo cambio. | PASS |
 | VI. Trazabilidad Documental y Proceso de Planificación (Spec Kit) | Artefactos en `specs/002-control-trayectoria/` trazables a FR y SC; los vacíos del docente y el riesgo de convención de giro quedan registrados en `spec.md`, `research.md` y `AGENTS.md` §27 en el mismo cambio. | PASS |
@@ -89,8 +100,9 @@ eso, y `DecisionMovimiento` conserva su semántica sin modificación. La decisi�
 **Re-check post-Fase 1 (diseño)**: PASS — el diseño generado (`research.md`, `data-model.md`,
 `contracts/`, `quickstart.md`) mantiene los seis gates: aritmética autorizada sin detectores
 automáticos (I), módulos por etapa con contratos explícitos y sin capas especulativas (II),
-`pyserial` declarada y confinada a `src/transporte/` (III), lógica determinista con envío desacoplado
-(IV), pruebas headless y métricas exportables (V), artefactos Spec Kit trazables (VI).
+transporte sin dependencias de terceros y confinado a `src/transporte/` (III), lógica determinista
+con envío desacoplado (IV), pruebas headless y métricas exportables (V), artefactos Spec Kit
+trazables (VI).
 
 ## Project Structure
 
@@ -105,8 +117,8 @@ specs/002-control-trayectoria/
 ├── quickstart.md        # Phase 1 output — verificación
 ├── contracts/           # Phase 1 output
 │   ├── api-control.md           # Contratos de estimador, control y compositor
-│   ├── transporte-bluetooth.md  # Trama SPP, opcodes, fallo seguro
-│   ├── esquema-configuracion.md # 10 parámetros nuevos + validación
+│   ├── transporte-bluetooth.md  # Byte único, tabla de bytes, enlace RFCOMM, fallo seguro
+│   ├── esquema-configuracion.md # 9 parámetros nuevos + validación
 │   └── mapa-comandos.md         # Los 4 comandos, precedencia, evidencia visual
 ├── checklists/
 │   └── plan-tecnico.md  # Trazabilidad por principio constitucional
@@ -117,7 +129,7 @@ specs/002-control-trayectoria/
 
 ```text
 config/
-└── vision.json                      # Se extiende con 10 claves (no se parte)
+└── vision.json                      # Se extiende con 9 claves (no se parte)
 
 src/
 ├── __init__.py                      # (existente)
@@ -141,7 +153,7 @@ src/
     ├── __init__.py
     ├── base.py                      # Protocol Transporte (sin I/O)
     ├── simulado.py                  # TransporteSimulado (todas las pruebas)
-    ├── spp.py                       # TransporteSPP — ÚNICO archivo que importa serial
+    ├── spp.py                       # TransporteSPP — ÚNICO archivo que abre un socket
     └── cola.py                      # ColaTransporte (desacople + deduplicación)
 
 tests/
@@ -149,12 +161,12 @@ tests/
 ├── fixtures/
 │   └── generador_sintetico.py       # + línea con desplazamiento y hueco
 ├── unit/
-│   ├── test_configuracion.py        # + validación de los 10 parámetros nuevos
+│   ├── test_configuracion.py        # + validación de los 9 parámetros nuevos
 │   ├── test_posicion_linea.py       # NUEVO
 │   ├── test_control_trayectoria.py  # NUEVO
 │   ├── test_compositor.py           # NUEVO
 │   ├── test_cola_transporte.py      # NUEVO
-│   └── test_transporte.py           # NUEVO (SPP con simulado, protocolo, fallos)
+│   └── test_transporte.py           # NUEVO (SPP con doble de socket, byte único, fallos)
 └── integration/
     ├── test_control_fotogramas.py   # NUEVO — secuencia completa
     ├── test_footage_control.py      # NUEVO — replay de videos/ (marcador footage)
@@ -175,17 +187,17 @@ no describe una etapa del pipeline. `transporte` sí: es la etapa que lleva la d
 Ambas carpetas **siguen vacías**.
 
 **Por qué fuera de `src/vision/`**: `src/vision/` es lógica pura sin I/O por diseño de 001 (las
-pruebas lo asumen). `pyserial` hace I/O. Separarlos mantiene la suite headless y permite que
-`TransporteSimulado` sustituya al driver real sin tocar una sola línea de visión.
+pruebas lo asumen). Un enlace de radio hace I/O. Separarlos mantiene la suite headless y permite que
+un doble de socket sustituya al enlace real sin tocar una sola línea de visión.
 
 **Impacto en artefactos existentes**:
 
 | Artefacto | Cambio |
 |-----------|--------|
-| `pyproject.toml` | **Añadir** `pyserial` a `dependencies` |
-| `uv.lock` | **Actualizar** por `uv sync` (reproducibilidad, Principio III) |
+| `pyproject.toml` | **Ninguno**: el transporte no añade dependencias (`socket` es de la estándar) |
+| `uv.lock` | **Ninguno**: no hay dependencia nueva que versionar (Principio III) |
 | `src/vision/modelos.py` | **Añadir** `ComandoMovimiento`, `Lado`, `CausaComando`, `PosicionLinea`, `DecisionControl`, `DecisionCompuesta` (sin tocar lo existente) |
-| `src/vision/configuracion.py` | **Añadir** los 10 parámetros y sus reglas cruzadas |
+| `src/vision/configuracion.py` | **Añadir** los 9 parámetros y sus reglas cruzadas |
 | `src/vision/pipeline.py` | **Integrar** estimador, control y compositor en el bucle |
 | `src/vision/metricas.py` | **Añadir** `MetricasControl` |
 | `src/vision/visualizacion.py` | **Extender** con evidencia de posición, objetivo y comando |

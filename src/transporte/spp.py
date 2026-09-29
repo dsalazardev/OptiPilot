@@ -42,14 +42,15 @@ MAPA_COMANDOS: dict[ComandoMovimiento, bytes] = {
     ComandoMovimiento.DETENER: b"x",
 }
 
-#: Delimitador appended al comando. Vacío: el receptor lee un byte por comando.
+#: Delimitador añadido al comando. Vacío: el receptor lee un byte por comando.
 SUFIJO = b""
 
 #: Canal RFCOMM estándar del perfil Serial Port Profile.
 CANAL_RFCOMM = 1
 
 #: Fábrica de sockets: se inyecta en los tests para no necesitar hardware.
-FabricaSocket = Callable[[], socket.socket]
+#: Recibe ``(familia, tipo, protocolo)``, la misma firma que ``socket.socket``.
+FabricaSocket = Callable[[int, int, int], socket.socket]
 
 
 def serializar(comando: ComandoMovimiento) -> bytes:

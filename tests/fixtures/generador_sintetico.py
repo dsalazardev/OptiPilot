@@ -34,6 +34,8 @@ __all__ = [
     "dibujar_linea_vertical",
     "dibujar_octagono",
     "fotograma_con_linea",
+    "fotograma_con_linea_con_hueco",
+    "fotograma_con_linea_en_borde",
     "fotograma_con_senal",
     "fotograma_vacio",
     "puntos_octagono",
@@ -90,6 +92,7 @@ def dibujar_linea_vertical(
     color_bgr: tuple[int, int, int] = LINEA_BGR,
     y_inicio: float = BANDA_LINEA_INICIO,
     y_fin: float = BANDA_LINEA_FIN,
+    hueco: tuple[float, float] | None = None,
 ) -> None:
     """Dibuja una línea vertical dentro de la banda ``y_inicio``-``y_fin``.
 
@@ -97,17 +100,28 @@ def dibujar_linea_vertical(
     ``config/vision.json``, calibrada contra el footage real: la banda guía es
     contigua en ``y`` 0.10-0.55 y la mitad inferior del cuadro es suelo cercano
     con sombra, no línea.
+
+    ``hueco`` permite dejar un tramo sin línea (fracciones del alto), para
+    reproducir una pérdida parcial o un descarrilamiento (US3).
     """
     alto = imagen.shape[0]
     y0 = int(round(y_inicio * alto))
     y1 = max(y0 + 1, int(round(y_fin * alto)) - 1)
-    cv2.rectangle(
-        imagen,
-        (x_centro - grosor // 2, y0),
-        (x_centro + grosor // 2, y1),
-        color_bgr,
-        thickness=-1,
-    )
+    tramos = [(y0, y1)]
+    if hueco is not None:
+        h0 = int(round(hueco[0] * alto))
+        h1 = int(round(hueco[1] * alto))
+        tramos = [(y0, min(h0, y1)), (max(h1, y0), y1)]
+    for inicio, fin in tramos:
+        if fin <= inicio:
+            continue
+        cv2.rectangle(
+            imagen,
+            (x_centro - grosor // 2, inicio),
+            (x_centro + grosor // 2, fin),
+            color_bgr,
+            thickness=-1,
+        )
 
 
 def aplicar_ruido(imagen: np.ndarray, sigma: float, semilla: int = 0) -> np.ndarray:
@@ -158,4 +172,43 @@ def fotograma_vacio(
 ) -> np.ndarray:
     """Fotograma sin línea ni señales (escena negativa)."""
     imagen = crear_fondo(alto, ancho)
+    return aplicar_ruido(imagen, ruido_sigma, semilla)
+
+
+def fotograma_con_linea_con_hueco(
+    x_centro: int = 320,
+    grosor: int = 24,
+    hueco: tuple[float, float] = (0.25, 0.40),
+    ruido_sigma: float = 0.0,
+    semilla: int = 0,
+    alto: int = ALTO_POR_DEFECTO,
+    ancho: int = ANCHO_POR_DEFECTO,
+) -> np.ndarray:
+    """Fotograma con la línea cortada por un tramo (para US3, recuperación).
+
+    El hueco parte la banda guía en dos, de modo que el estimador ve soporte
+    partido o una pérdida, según su tamaño.
+    """
+    imagen = crear_fondo(alto, ancho)
+    dibujar_linea_vertical(imagen, x_centro, grosor, hueco=hueco)
+    return aplicar_ruido(imagen, ruido_sigma, semilla)
+
+
+def fotograma_con_linea_en_borde(
+    lado: str = "izquierda",
+    grosor: int = 16,
+    ruido_sigma: float = 0.0,
+    semilla: int = 0,
+    alto: int = ALTO_POR_DEFECTO,
+    ancho: int = ANCHO_POR_DEFECTO,
+) -> np.ndarray:
+    """Fotograma con la línea pegada al borde de la ROI (pérdida de confianza).
+
+    El pico del soporte toca el borde de la banda, que es una de las causas de
+    ``valida=False`` por confianza penalizada (FR-007).
+    """
+    imagen = crear_fondo(alto, ancho)
+    margen = max(1, grosor // 2)
+    x = margen if lado.lower().startswith("i") else ancho - margen - 1
+    dibujar_linea_vertical(imagen, x, grosor)
     return aplicar_ruido(imagen, ruido_sigma, semilla)

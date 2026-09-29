@@ -17,5 +17,8 @@ CLI hacia adentro.
 from __future__ import annotations
 
 from src.transporte.base import Transporte
+from src.transporte.cola import ColaTransporte
+from src.transporte.simulado import TransporteSimulado
+from src.transporte.spp import TransporteSPP
 
-__all__ = ["Transporte", "base"]
+__all__ = ["ColaTransporte", "Transporte", "TransporteSPP", "TransporteSimulado", "base"]

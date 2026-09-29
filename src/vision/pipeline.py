@@ -25,14 +25,23 @@ import time
 import numpy as np
 
 from .candidatos import ExtractorCandidatos
+from .compositor import componer
 from .configuracion import ParametrosConfiguracion
+from .control_trayectoria import ControlTrayectoria
 from .deteccion import Detector
 from .modelos import (
     CandidatoSenal,
+    CausaComando,
     ClaseSenal,
+    ComandoMovimiento,
+    DecisionCompuesta,
+    DecisionControl,
+    DecisionMovimiento,
     MarcadorVisibilidadPlena,
+    PosicionLinea,
     ResultadoProcesamiento,
 )
+from .posicion_linea import EstimadorLinea
 from .preprocesamiento import Preprocesador
 from .segmentacion import Segmentador
 
@@ -59,6 +68,11 @@ class PipelineVision:
         self._segmentador = Segmentador(params)
         self._extractor_candidatos = ExtractorCandidatos(params)
         self._detector = Detector(params)
+        # Etapas de control (feature 002): posición de la línea y ley de control.
+        # El compositor se aplica en `componer`, porque necesita el veredicto de
+        # la FSM, que se actualiza fuera del pipeline.
+        self._estimador = EstimadorLinea(params)
+        self._control = ControlTrayectoria(params)
         self._area_minima_rel = params.area_minima_rel
         self._visibilidad_plena: dict[ClaseSenal, MarcadorVisibilidadPlena | None] = {
             ClaseSenal.PARE: None,
@@ -71,7 +85,12 @@ class PipelineVision:
         t_s: float,
         imagen_bgr: np.ndarray,
     ) -> ResultadoProcesamiento:
-        """Procesa un fotograma y devuelve el ``ResultadoProcesamiento``."""
+        """Procesa un fotograma y devuelve el ``ResultadoProcesamiento``.
+
+        La firma pública **no cambia** respecto a 001; los campos nuevos
+        (``posicion`` y ``decision_control``) se añadieron con valor por defecto
+        al resultado.
+        """
         inicio = time.perf_counter()
 
         preprocesado = self._preprocesador.aplicar(imagen_bgr)
@@ -86,6 +105,12 @@ class PipelineVision:
         for clase in deteccion.clases_rearmadas:
             self._visibilidad_plena[clase] = None
 
+        # Etapas de control: posición lateral → propuesta del control. El
+        # estimador tolera máscaras vacías devolviendo una posición inválida
+        # (FR-006), así que esto no puede romper un fotograma degradado.
+        posicion = self._estimador.aplicar(segmentacion)
+        decision_control = self._control.decidir(posicion)
+
         latencia_ms = (time.perf_counter() - inicio) * 1000.0
 
         return ResultadoProcesamiento(
@@ -95,7 +120,46 @@ class PipelineVision:
             eventos=list(deteccion.eventos),
             latencia_ms=latencia_ms,
             visibilidad_plena=visibilidad,
+            posicion=posicion,
+            decision_control=decision_control,
         )
+
+    def componer(
+        self,
+        resultado: ResultadoProcesamiento,
+        movimiento: DecisionMovimiento,
+    ) -> DecisionCompuesta:
+        """Aplica el compositor de seguridad al resultado y al veredicto de la FSM.
+
+        Es el tercer nivel de la integración ``estimador → control → compositor``:
+        recibe lo ya calculado en :meth:`procesar` y el veredicto que produce la
+        máquina de estados, y devuelve la ``DecisionCompuesta`` del fotograma.
+        Si por algún motivo faltaran la posición o la propuesta del control (un
+        resultado construido a mano), cae a ``DETENER`` por ``FALLO_SEGURO`` para
+        no operar con datos ausentes.
+        """
+        if resultado.posicion is None or resultado.decision_control is None:
+            return componer(
+                resultado.decision_control
+                or DecisionControl(
+                    comando=ComandoMovimiento.DETENER, causa=CausaComando.FALLO_SEGURO
+                ),
+                movimiento,
+                resultado.posicion
+                or PosicionLinea(
+                    x_px=None,
+                    x_norm=None,
+                    error_norm=None,
+                    ancho_banda_px=0.0,
+                    confianza=0.0,
+                    valida=False,
+                ),
+            )
+        return componer(resultado.decision_control, movimiento, resultado.posicion)
+
+    def reiniciar_control(self) -> None:
+        """Reinicia la memoria del control entre corridas (FR-023)."""
+        self._control.reiniciar()
 
     def _marcar_visibilidad(
         self,

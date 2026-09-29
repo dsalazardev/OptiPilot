@@ -336,7 +336,14 @@ class Parada:
 
 @dataclass
 class ResultadoProcesamiento:
-    """Salida del pipeline para un fotograma (data-model §12)."""
+    """Salida del pipeline para un fotograma (data-model §12).
+
+    Desde la feature 002 transporta además la **posición lateral** estimada y la
+    **propuesta del control** (``estimador → control``). El compositor no puede
+    ejecutarse aquí porque necesita el veredicto de la FSM, que se actualiza
+    después; el pipeline lo aplica en :meth:`PipelineVision.componer`. Los dos
+    campos nuevos son opcionales para no romper a los consumidores de 001.
+    """
 
     segmentacion: ResultadoSegmentacion
     candidatos: list[CandidatoSenal]
@@ -344,6 +351,8 @@ class ResultadoProcesamiento:
     eventos: list[EventoSenal]
     latencia_ms: float
     visibilidad_plena: list[MarcadorVisibilidadPlena] = field(default_factory=list)
+    posicion: "PosicionLinea | None" = None
+    decision_control: "DecisionControl | None" = None
 
     def __post_init__(self) -> None:
         _exigir(self.latencia_ms >= 0, "latencia_ms debe ser >= 0")

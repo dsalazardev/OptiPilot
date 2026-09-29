@@ -297,3 +297,80 @@ def test_un_fotograma_negro_no_rompe_el_pipeline(
     pipeline = PipelineVision(parametros_por_defecto)
     resultado = pipeline.procesar(0, 0.0, np.zeros((480, 640, 3), dtype=np.uint8))
     assert resultado.senales_confirmadas == []
+
+
+# --------------------------------------------------------------------------
+# Etapas nuevas del control (T042): estimador, control+compositor y cola
+# --------------------------------------------------------------------------
+
+#: Umbrales del contrato (``quickstart.md`` §5): el estimador por debajo de 1 ms,
+#: control + compositor por debajo de 0.1 ms, ``encolar`` en O(1).
+UMBRAL_ESTIMADOR_MS = 1.0
+UMBRAL_CONTROL_MS = 0.1
+UMBRAL_ENCOLAR_MS = 0.01
+UMBRAL_FOTOGRAMA_MS = 33.0  # 30 fps
+
+
+def test_el_estimador_de_posicion_cuesta_menos_de_un_milisegundo(
+    parametros_por_defecto: ParametrosConfiguracion,
+) -> None:
+    from src.vision.posicion_linea import EstimadorLinea
+
+    pipeline = PipelineVision(parametros_por_defecto)
+    estimador = EstimadorLinea(parametros_por_defecto)
+    resultados = [
+        pipeline.procesar(i, i / 30.0, _con_ruido(i)) for i in range(FOTOGRAMAS_DE_CALENTAMIENTO)
+    ] + [pipeline.procesar(i, i / 30.0, _con_ruido(i)) for i in range(FOTOGRAMAS_MEDIDOS)]
+
+    inicio = time.perf_counter()
+    for resultado in resultados:
+        estimador.aplicar(resultado.segmentacion)
+    media_ms = (time.perf_counter() - inicio) * 1000.0 / len(resultados)
+    assert media_ms < UMBRAL_ESTIMADOR_MS, f"estimador: {media_ms:.3f} ms"
+
+
+def test_control_y_compositor_cuestan_menos_de_una_decima_de_milisegundo(
+    parametros_por_defecto: ParametrosConfiguracion,
+) -> None:
+    from src.vision.compositor import componer
+    from src.vision.control_trayectoria import ControlTrayectoria
+    from src.vision.modelos import DecisionMovimiento, PermisoMovimiento
+
+    pipeline = PipelineVision(parametros_por_defecto)
+    control = ControlTrayectoria(parametros_por_defecto)
+    movimiento = DecisionMovimiento(PermisoMovimiento.AUTORIZADO, "INICIO")
+
+    preparados = [pipeline.procesar(i, i / 30.0, _fotograma_con_linea()) for i in range(80)]
+
+    inicio = time.perf_counter()
+    for resultado in preparados:
+        decision = control.decidir(resultado.posicion)
+        componer(decision, movimiento, resultado.posicion)
+    media_ms = (time.perf_counter() - inicio) * 1000.0 / len(preparados)
+    assert media_ms < UMBRAL_CONTROL_MS, f"control+compositor: {media_ms:.4f} ms"
+
+
+def test_encolar_es_o_uno_y_sin_io(
+    parametros_por_defecto: ParametrosConfiguracion,
+) -> None:
+    from src.transporte.cola import ColaTransporte
+    from src.vision.modelos import ComandoMovimiento
+
+    cola = ColaTransporte()
+    comandos = list(ComandoMovimiento)
+    inicio = time.perf_counter()
+    for i in range(1000):
+        cola.encolar(comandos[i % len(comandos)])
+    media_ms = (time.perf_counter() - inicio) * 1000.0 / 1000
+    assert media_ms < UMBRAL_ENCOLAR_MS, f"encolar: {media_ms:.5f} ms"
+    # No se drenó nada: encolar no hace E/S.
+    assert cola.pendientes() > 0
+
+
+def test_el_fotograma_completo_cabe_en_33_ms(
+    parametros_por_defecto: ParametrosConfiguracion,
+) -> None:
+    """Presupuesto de tiempo real del contrato: 33 ms por fotograma a 30 fps."""
+    latencias, _ = medir_latencias(parametros_por_defecto, _con_ruido)
+    p95 = _percentil(latencias, 95.0)
+    assert p95 <= UMBRAL_FOTOGRAMA_MS, f"p95={p95:.2f} ms supera los 33 ms"

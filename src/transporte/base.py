@@ -2,8 +2,8 @@
 
 Deliberadamente un ``Protocol`` y no una clase base: las pruebas inyectan
 ``TransporteSimulado`` sin herencia, y ``src/vision/`` no depende de nada de
-``pyserial`` ni de ningún driver. ``src/transporte/spp.py`` es el único módulo
-del proyecto que importa ``serial``.
+``socket`` ni de ningún driver. ``src/transporte/spp.py`` es el único módulo
+del proyecto que abre un socket.
 
 **La definición no hace E/S.** ``enviar`` es la frontera: su implementación sí
 escribe en un puerto, el ``Protocol`` solo fija la firma y el contrato de

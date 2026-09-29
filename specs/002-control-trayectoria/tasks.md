@@ -200,11 +200,11 @@ independientemente de lo que proponga el control.
     `ultimo_error` son consultables sin excepción
   - **MAC configurable**: dos MAC distintas producen dos destinos distintos
   - Norma: ningún módulo del proyecto importa `serial`
-- [ ] T027 [P] [US4] Tests de `ColaTransporte` en `tests/unit/test_cola_transporte.py`: `encolar`
+- [X] T027 [P] [US4] Tests de `ColaTransporte` en `tests/unit/test_cola_transporte.py`: `encolar`
       deduplica comandos idénticos consecutivos; FIFO en `drenar`; un fallo de envío deja el comando
       pendiente y registra `ultimo_error`; la reconexión reanuda sin duplicar; `pendientes()` refleja
       el backlog
-- [ ] T028 [US4] Crear `src/transporte/simulado.py` con `TransporteSimulado`: registra el historial,
+- [X] T028 [US4] Crear `src/transporte/simulado.py` con `TransporteSimulado`: registra el historial,
       permite inyectar fallos (`fallar_con(n)`) para probar reconexión (T18 del contrato)
 - [X] T029 [US4] Crear `src/transporte/spp.py` con `TransporteSPP` — **el único archivo del
       proyecto que abre un socket** — con el protocolo de **un byte ASCII por comando** (`w`, `a`,
@@ -214,10 +214,10 @@ independientemente de lo que proponga el control.
       (se abre en el primer `enviar`, nunca en `__init__`); **fábrica de sockets inyectable** para que
       la suite corra sin hardware; captura de fallos de apertura; `cerrar` idempotente y reintento
       best-effort de reapertura. **Ninguna dependencia de terceros**
-- [ ] T030 [US4] Crear `src/transporte/cola.py` con `ColaTransporte`: `encolar` O(1) sin I/O
+- [X] T030 [US4] Crear `src/transporte/cola.py` con `ColaTransporte`: `encolar` O(1) sin I/O
       (FR-031), deduplicación (FR-032), `drenar` FIFO con reintento de pendientes, y la garantía de
       que el bucle de visión **nunca** la invoca
-- [ ] T031 [US4] Test de no-bloqueo: verificar que el bucle de visión invoca `encolar` y **no**
+- [X] T031 [US4] Test de no-bloqueo: verificar que el bucle de visión invoca `encolar` y **no**
       `drenar` en ningún camino de código (SC-005, T14 del contrato)
 
 **Checkpoint**: US4 verificable por completo sin hardware. El canal hacia el robot existe y es
@@ -227,22 +227,22 @@ auditable.
 
 ## Phase 7: Integración en el pipeline y métricas
 
-- [ ] T032 [P] [US1] Añadir `MetricasControl` a `src/vision/metricas.py`: `correcciones`
+- [X] T032 [P] [US1] Añadir `MetricasControl` a `src/vision/metricas.py`: `correcciones`
       (transiciones `AVANZAR ↔ lado`, proxy de SC-001), fotogramas por comando, `perdidas_linea`,
       `recuperaciones_ok`, `recuperaciones_fallidas`, `velocidad_error_px` y `latencia_decision_ms`
       — **sin modificar** `MetricasCorrida` de 001
-- [ ] T033 [US1] Integrar en `src/vision/pipeline.py`: estimador → control → compositor, y exponer
+- [X] T033 [US1] Integrar en `src/vision/pipeline.py`: estimador → control → compositor, y exponer
       la `DecisionCompuesta` por fotograma sin alterar la firma pública existente
-- [ ] T034 [US1] Extender `src/vision/visualizacion.py` con la evidencia de `mapa-comandos.md` §6:
+- [X] T034 [US1] Extender `src/vision/visualizacion.py` con la evidencia de `mapa-comandos.md` §6:
       posición estimada, objetivo, zona muerta, banda de histéresis, comando y causa, indicador de
       memoria de lado y gráfico de velocidad de error (FR-037, SC-009)
-- [ ] T035 [US4] Cablear en `src/main.py`: construir `ColaTransporte` e inyectar el transporte
+- [X] T035 [US4] Cablear en `src/main.py`: construir `ColaTransporte` e inyectar el transporte
       según un flag `--transporte {simulado,spp}`; **`simulado` es el default** para que el CLI
       funcione sin hardware (reutilizando la máscara vacía como transporte por defecto)
-- [ ] T036 [P] [US1] Tests de integración en `tests/integration/test_control_fotogramas.py`:
+- [X] T036 [P] [US1] Tests de integración en `tests/integration/test_control_fotogramas.py`:
       recorrido completo segmento → estima → decide → compone → encola, con verificación de la
       precedencia de seguridad sobre una secuencia completa
-- [ ] T037 [P] [US1] Ampliar `tests/fixtures/generador_sintetico.py`: línea desplazada
+- [X] T037 [P] [US1] Ampliar `tests/fixtures/generador_sintetico.py`: línea desplazada
       paramétricamente, línea con hueco (para US3) y línea en el borde de la ROI (para pérdida de
       confianza)
 
@@ -252,16 +252,16 @@ auditable.
 
 ## Phase 8: Validación con footage real (Principio V: antes de integrar)
 
-- [ ] T038 [US1] Crear `tests/integration/test_footage_control.py` marcado `footage`: reproduccir
+- [X] T038 [US1] Crear `tests/integration/test_footage_control.py` marcado `footage`: reproduccir
       `videos/rutaIdeal/` y `videos/desarrilamiento/` y registrar `MetricasControl`. Debe omitirse
       limpiamente sin `OPTIPILOT_VIDEO_DIR` (mismo patrón que `test_footage_linea.py`)
-- [ ] T039 [US1] Verificar la **estabilidad** del estimador contra footage: correlación ≥ 0.7 entre
+- [X] T039 [US1] Verificar la **estabilidad** del estimador contra footage: correlación ≥ 0.7 entre
       dos estimadores independientes (SC-006, dato de referencia: +0.76/+0.86 medido el 2026-09-28)
-- [ ] T040 [US1] Verificar que la velocidad de error discrimina los dos corpus: ~15–20 px en
+- [X] T040 [US1] Verificar que la velocidad de error discrimina los dos corpus: ~15–20 px en
       `rutaIdeal` frente a ~52 px en `desarrilamiento`
-- [ ] T041 [US2] Verificar sobre footage que **nunca** se emite `CORRECCION_*` cuando
+- [X] T041 [US2] Verificar sobre footage que **nunca** se emite `CORRECCION_*` cuando
       `pos.valida == False` (SC-003)
-- [ ] T042 [US1] Extender `tests/integration/test_rendimiento.py` (marcador `perf`): estimador < 1 ms,
+- [X] T042 [US1] Extender `tests/integration/test_rendimiento.py` (marcador `perf`): estimador < 1 ms,
       control + compositor < 0.1 ms, `encolar` O(1); pipeline completo ≤ 33 ms (SC-005)
 
 **Nota de honestidad**: SC-001 (≤ 3 correcciones) es un criterio de **pista**. Los videos de práctica

@@ -21,7 +21,10 @@ import math
 from pathlib import Path
 
 from .modelos import (
+    CausaComando,
     ClaseSenal,
+    ComandoMovimiento,
+    DecisionCompuesta,
     EventoSenal,
     MarcadorVisibilidadPlena,
     Parada,
@@ -30,7 +33,7 @@ from .modelos import (
     TransicionEstado,
 )
 
-__all__ = ["MetricasCorrida"]
+__all__ = ["MetricasControl", "MetricasCorrida"]
 
 _CLAVES_RESUMEN = (
     "corrida_id",
@@ -262,3 +265,123 @@ class MetricasCorrida:
     def _eventos_ordenados(self) -> list[EventoSenal]:
         """Eventos en orden temporal; a igualdad de tiempo, orden de inserción."""
         return sorted(self._eventos, key=lambda evento: (evento.t_s, evento.fotograma_idx))
+
+
+# ---------------------------------------------------------------------------
+# Control de trayectoria (specs/002 — T032)
+# ---------------------------------------------------------------------------
+
+#: Comandos laterales: los que expresan «la línea está de ese lado».
+_LATERALES = frozenset({ComandoMovimiento.IZQUIERDA, ComandoMovimiento.DERECHA})
+
+
+def _es_transicion_lateral(anterior: ComandoMovimiento, actual: ComandoMovimiento) -> bool:
+    """True si el comando pasa entre ``AVANZAR`` y un lateral (en cualquier sentido).
+
+    Es la definición de *corrección* que usa SC-001: una corrección empieza
+    cuando se abandona el avance recto y termina cuando se vuelve a él.
+    """
+    return (anterior is ComandoMovimiento.AVANZAR and actual in _LATERALES) or (
+        actual is ComandoMovimiento.AVANZAR and anterior in _LATERALES
+    )
+
+
+class MetricasControl:
+    """Acumula la evidencia del control de trayectoria por corrida (T032).
+
+    Consume la ``DecisionCompuesta`` de cada fotograma y deriva las métricas que
+    la rúbrica necesita para el análisis de resultados (criterio 11):
+
+    - ``correcciones``: transiciones ``AVANZAR ↔`` lateral, proxy de SC-001.
+    - ``fotogramas_por_comando``: reparto del tiempo entre los cuatro comandos.
+    - ``perdidas_linea``: cuántas veces se dejó de ver la línea (``pos.valida``).
+    - ``recuperaciones_ok`` / ``recuperaciones_fallidas``: se retomó la línea
+      dentro de la ventana de gracia, o se agotó (FR-020).
+    - ``velocidad_error_px``: cambio de ``x_px`` entre fotogramas válidos.
+    - ``latencia_decision_ms``: tiempo de estimar + decidir + componer.
+
+    **No modifica ``MetricasCorrida``** (FR-026): son dos responsabilidades
+    distintas —detección de señales frente a control— y mezclarlas habría
+    cambiado el resumen de 001, del que dependen sus pruebas.
+    """
+
+    def __init__(self) -> None:
+        self._correcciones = 0
+        self._por_comando: dict[ComandoMovimiento, int] = {c: 0 for c in ComandoMovimiento}
+        self._perdidas_linea = 0
+        self._recuperaciones_ok = 0
+        self._recuperaciones_fallidas = 0
+        self._velocidades_error_px: list[float] = []
+        self._latencias_decision_ms: list[float] = []
+        self._comando_anterior: ComandoMovimiento | None = None
+        self._valida_anterior: bool | None = None
+        self._x_anterior: float | None = None
+        self._en_perdida = False
+
+    def registrar(self, decision: DecisionCompuesta, latencia_decision_ms: float = 0.0) -> None:
+        """Registra la decisión de un fotograma y actualiza los contadores.
+
+        ``latencia_decision_ms`` es opcional: cuando no se mide, no se añade
+        muestra y la lista de latencias queda vacía (igual que en el contrato).
+        """
+        comando = decision.comando
+        self._por_comando[comando] += 1
+
+        if self._comando_anterior is not None and _es_transicion_lateral(
+            self._comando_anterior, comando
+        ):
+            self._correcciones += 1
+        self._comando_anterior = comando
+
+        posicion = decision.posicion
+        if posicion.valida:
+            self._registrar_fotograma_valido(posicion, decision)
+        else:
+            self._registrar_fotograma_invalido(decision)
+
+        self._valida_anterior = posicion.valida
+        if latencia_decision_ms > 0:
+            self._latencias_decision_ms.append(float(latencia_decision_ms))
+
+    def _registrar_fotograma_valido(self, posicion, decision: DecisionCompuesta) -> None:
+        if self._en_perdida:
+            if decision.causa in (CausaComando.RECUPERACION, CausaComando.SEGUIMIENTO):
+                self._recuperaciones_ok += 1
+            self._en_perdida = False
+        if self._x_anterior is not None and posicion.x_px is not None:
+            self._velocidades_error_px.append(abs(posicion.x_px - self._x_anterior))
+        self._x_anterior = posicion.x_px
+
+    def _registrar_fotograma_invalido(self, decision: DecisionCompuesta) -> None:
+        if self._valida_anterior is not False:
+            self._perdidas_linea += 1
+        self._en_perdida = True
+        if decision.causa is CausaComando.GRACIA_AGOTADA:
+            self._recuperaciones_fallidas += 1
+            self._en_perdida = False
+        self._x_anterior = None
+
+    def resumen(self) -> dict:
+        """Resumen con todas las claves, aunque no haya datos (Regla 2)."""
+        return {
+            "correcciones": self._correcciones,
+            "fotogramas_por_comando": {str(clave): valor for clave, valor in self._por_comando.items()},
+            "perdidas_linea": self._perdidas_linea,
+            "recuperaciones_ok": self._recuperaciones_ok,
+            "recuperaciones_fallidas": self._recuperaciones_fallidas,
+            "velocidad_error_px_media": (
+                sum(self._velocidades_error_px) / len(self._velocidades_error_px)
+                if self._velocidades_error_px
+                else 0.0
+            ),
+            "velocidad_error_px_p95": _percentil(self._velocidades_error_px, 95.0),
+            "velocidad_error_px_max": max(self._velocidades_error_px, default=0.0),
+            "velocidades_error_px": list(self._velocidades_error_px),
+            "latencia_decision_ms_media": (
+                sum(self._latencias_decision_ms) / len(self._latencias_decision_ms)
+                if self._latencias_decision_ms
+                else 0.0
+            ),
+            "latencia_decision_ms_p95": _percentil(self._latencias_decision_ms, 95.0),
+            "latencias_decision_ms": list(self._latencias_decision_ms),
+        }

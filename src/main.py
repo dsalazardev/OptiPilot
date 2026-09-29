@@ -23,6 +23,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import threading
+import time
 from collections.abc import Iterator, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -30,13 +32,17 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from src.transporte.base import Transporte
+from src.transporte.cola import ColaTransporte
+from src.transporte.simulado import TransporteSimulado
+from src.transporte.spp import TransporteSPP
 from src.vision.configuracion import (
     ConfiguracionInvalidaError,
     ParametrosConfiguracion,
     cargar_parametros,
 )
 from src.vision.maquina_estados import MaquinaEstados
-from src.vision.metricas import MetricasCorrida
+from src.vision.metricas import MetricasControl, MetricasCorrida
 from src.vision.modelos import (
     ClaseSenal,
     EstadoRobot,
@@ -195,6 +201,55 @@ class Referencia:
         return False, None
 
 
+def _construir_transporte(nombre: str, params: ParametrosConfiguracion) -> Transporte:
+    """Crea el transporte pedido por ``--transporte`` (T035).
+
+    ``simulado`` es el valor por defecto para que el CLI funcione sin hardware;
+    ``spp`` usa el enlace RFCOMM real. Construir ``TransporteSPP`` **no** abre el
+    socket: la conexión es perezosa (se abre en el primer ``enviar``), así que
+    arrancar el CLI nunca depende de que el mBot esté encendido.
+    """
+    if nombre == "simulado":
+        return TransporteSimulado()
+    if nombre == "spp":
+        return TransporteSPP(mac=params.mac_bluetooth, timeout_s=params.timeout_transporte_s)
+    raise ConfiguracionInvalidaError("transporte", f"transporte desconocido: {nombre}")
+
+
+class _BombeoTransporte:
+    """Hilo que drena la cola hacia el transporte, fuera del bucle de visión.
+
+    El bucle de visión solo llama a ``encolar`` (O(1), sin E/S); este hilo hace
+    el ``sendall`` bloqueante. Esa separación es lo que garantiza que un enlace
+    caído no congele la detección (FR-031, SC-005).
+
+    El hilo es *daemon* y se detiene explícitamente al terminar la corrida; el
+    ``esperar`` con timeout evita girar en vacío y permite un apagado rápido.
+    """
+
+    def __init__(self, cola: ColaTransporte, transporte: Transporte, intervalo_s: float = 0.005) -> None:
+        self._cola = cola
+        self._transporte = transporte
+        self._intervalo_s = intervalo_s
+        self._parar = threading.Event()
+        self._hilo = threading.Thread(target=self._bucle, name="transporte", daemon=True)
+
+    def iniciar(self) -> None:
+        self._hilo.start()
+
+    def detener(self) -> None:
+        """Pide al hilo que termine y espera a que lo haga, con un último drenaje."""
+        self._parar.set()
+        self._hilo.join(timeout=1.0)
+        # Un último intento para vaciar lo que quedara pendiente al cerrar.
+        self._cola.drenar(self._transporte)
+
+    def _bucle(self) -> None:
+        while not self._parar.is_set():
+            self._cola.drenar(self._transporte)
+            self._parar.wait(self._intervalo_s)
+
+
 # -- corrida ---------------------------------------------------------------
 
 
@@ -238,6 +293,26 @@ def _resumen_consola(resumen: dict) -> str:
     return "\n".join(lineas)
 
 
+def _resumen_control_consola(resumen: dict) -> str:
+    """Resumen del control de trayectoria para la consola (T032/T035)."""
+    por_comando = resumen["fotogramas_por_comando"]
+    return "\n".join(
+        [
+            "=== Resumen de control ===",
+            f"correcciones        : {resumen['correcciones']}",
+            "fotogramas por cmd  : "
+            + " ".join(f"{clave}={valor}" for clave, valor in por_comando.items()),
+            f"perdidas de linea   : {resumen['perdidas_linea']}",
+            f"recuperaciones ok   : {resumen['recuperaciones_ok']}",
+            f"recuperaciones fall.: {resumen['recuperaciones_fallidas']}",
+            f"velocidad error px  : media={resumen['velocidad_error_px_media']:.2f} "
+            f"p95={resumen['velocidad_error_px_p95']:.2f}",
+            f"latencia decision   : media={resumen['latencia_decision_ms_media']:.2f} ms "
+            f"p95={resumen['latencia_decision_ms_p95']:.2f} ms",
+        ]
+    )
+
+
 def _correr(
     params: ParametrosConfiguracion,
     fuente: str,
@@ -246,11 +321,17 @@ def _correr(
     corrida_id: str,
     max_fotogramas: int | None,
     referencia: Referencia,
+    cola: ColaTransporte,
+    transporte: Transporte,
+    metricas_control: MetricasControl,
 ) -> MetricasCorrida:
-    """Recorre la fuente componiendo pipeline, máquina de estados y métricas."""
+    """Recorre la fuente componiendo pipeline, FSM, control, métricas y transporte."""
     pipeline = PipelineVision(params)
     maquina = MaquinaEstados(params, t_inicial=0.0)
     metricas = MetricasCorrida(corrida_id=corrida_id, fuente=fuente)
+
+    bombeo = _BombeoTransporte(cola, transporte)
+    bombeo.iniciar()
 
     frames = None
     if diagnostico:
@@ -260,54 +341,69 @@ def _correr(
     marcadores: dict[ClaseSenal, MarcadorVisibilidadPlena] = {}
     inicio_parada: float | None = None
 
-    for indice, t_s, imagen in _iterar_fotogramas(fuente, params.fps_objetivo, max_fotogramas):
-        resultado = pipeline.procesar(indice, t_s, imagen)
+    try:
+        for indice, t_s, imagen in _iterar_fotogramas(fuente, params.fps_objetivo, max_fotogramas):
+            t_inicio_fotograma = time.perf_counter()
+            resultado = pipeline.procesar(indice, t_s, imagen)
 
-        for marcador in resultado.visibilidad_plena:
-            marcadores.setdefault(marcador.clase, marcador)
+            for marcador in resultado.visibilidad_plena:
+                marcadores.setdefault(marcador.clase, marcador)
 
-        for evento in resultado.eventos:
-            metricas.registrar_evento(evento)
+            for evento in resultado.eventos:
+                metricas.registrar_evento(evento)
 
-        presentes = frozenset(senal.clase for senal in resultado.senales_confirmadas)
-        estado = maquina.actualizar(presentes, resultado.eventos, t_s)
+            presentes = frozenset(senal.clase for senal in resultado.senales_confirmadas)
+            estado = maquina.actualizar(presentes, resultado.eventos, t_s)
 
-        for transicion in estado.transiciones_nuevas:
-            metricas.registrar_transicion(transicion)
+            for transicion in estado.transiciones_nuevas:
+                metricas.registrar_transicion(transicion)
 
-        for senal in resultado.senales_confirmadas:
-            if referencia.tiene_tramos:
-                anotada, clase_anotada = referencia.consultar(senal.fotograma_idx)
-            else:
-                # Sin referencia el módulo solo cuenta ocurrencias y no juzga acierto.
-                anotada, clase_anotada = None, None
-            metricas.registrar_senal(
-                senal,
-                anotada=anotada,
-                clase_anotada=clase_anotada,
-            )
-            marcador = marcadores.get(senal.clase)
-            if marcador is not None:
-                metricas.registrar_latencia_desde_marcador(
-                    marcador, senal.fotograma_idx, senal.t_s
+            for senal in resultado.senales_confirmadas:
+                if referencia.tiene_tramos:
+                    anotada, clase_anotada = referencia.consultar(senal.fotograma_idx)
+                else:
+                    # Sin referencia el módulo solo cuenta ocurrencias y no juzga acierto.
+                    anotada, clase_anotada = None, None
+                metricas.registrar_senal(
+                    senal,
+                    anotada=anotada,
+                    clase_anotada=clase_anotada,
                 )
+                marcador = marcadores.get(senal.clase)
+                if marcador is not None:
+                    metricas.registrar_latencia_desde_marcador(
+                        marcador, senal.fotograma_idx, senal.t_s
+                    )
 
-        metricas.registrar_fotograma(resultado.latencia_ms, t_s)
+            metricas.registrar_fotograma(resultado.latencia_ms, t_s)
 
-        if inicio_parada is None and estado.estado is not EstadoRobot.EN_MARCHA:
-            inicio_parada = t_s
-        if estado.estado is EstadoRobot.EN_MARCHA and inicio_parada is not None:
-            metricas.registrar_parada(
-                Parada.crear(
-                    inicio_t=inicio_parada,
-                    t_configurado_s=params.t_parada_s,
-                    fin_t=t_s,
+            # Control de trayectoria (feature 002): estimar → decidir → componer
+            # con el veredicto de la FSM, y encolar el comando final. El bucle
+            # NUNCA drena: eso lo hace el hilo de transporte (SC-005).
+            decision = pipeline.componer(resultado, estado.decision)
+            latencia_decision_ms = (time.perf_counter() - t_inicio_fotograma) * 1000.0
+            metricas_control.registrar(decision, latencia_decision_ms)
+            cola.encolar(decision.comando)
+
+            if inicio_parada is None and estado.estado is not EstadoRobot.EN_MARCHA:
+                inicio_parada = t_s
+            if estado.estado is EstadoRobot.EN_MARCHA and inicio_parada is not None:
+                metricas.registrar_parada(
+                    Parada.crear(
+                        inicio_t=inicio_parada,
+                        t_configurado_s=params.t_parada_s,
+                        fin_t=t_s,
+                    )
                 )
-            )
-            inicio_parada = None
+                inicio_parada = None
 
-        if frames is not None:
-            cv2.imwrite(str(frames / f"frame_{indice:06d}.png"), anotar(imagen, resultado, estado))
+            if frames is not None:
+                cv2.imwrite(
+                    str(frames / f"frame_{indice:06d}.png"),
+                    anotar(imagen, resultado, estado, params, decision),
+                )
+    finally:
+        bombeo.detener()
 
     return metricas
 
@@ -348,6 +444,12 @@ def _parsear_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default=None,
         help="JSON de referencia para confrontar detecciones (opcional, FR-025)",
     )
+    analizador.add_argument(
+        "--transporte",
+        choices=("simulado", "spp"),
+        default="simulado",
+        help="transporte hacia el robot: 'simulado' (por defecto, sin hardware) o 'spp' (RFCOMM real)",
+    )
     return analizador.parse_args(argv)
 
 
@@ -372,6 +474,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     directorio, corrida_id = _resolver_salida(args.salida)
 
     try:
+        transporte = _construir_transporte(args.transporte, params)
+    except ConfiguracionInvalidaError as error:
+        print(f"[error] {error}", file=sys.stderr)
+        return CODIGO_ENTRADA_INVALIDA
+
+    cola = ColaTransporte()
+    metricas_control = MetricasControl()
+
+    try:
         metricas = _correr(
             params=params,
             fuente=args.fuente,
@@ -380,6 +491,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             corrida_id=corrida_id,
             max_fotogramas=args.max_fotogramas,
             referencia=referencia,
+            cola=cola,
+            transporte=transporte,
+            metricas_control=metricas_control,
         )
     except FuenteInvalidaError as error:
         print(f"[error] fuente invalida: {error}", file=sys.stderr)
@@ -387,16 +501,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfiguracionInvalidaError as error:
         print(f"[error] configuracion invalida: {error}", file=sys.stderr)
         return CODIGO_ENTRADA_INVALIDA
+    finally:
+        transporte.cerrar()
 
     try:
         ruta_eventos, ruta_metricas = metricas.exportar(directorio)
+        ruta_control = directorio / "metricas_control.json"
+        with ruta_control.open("w", encoding="utf-8") as archivo:
+            json.dump(metricas_control.resumen(), archivo, ensure_ascii=False, indent=2)
+            archivo.write("\n")
     except OSError as error:
         print(f"[error] no se pudieron escribir los artefactos: {error}", file=sys.stderr)
         return CODIGO_ERROR_EJECUCION
 
     print(_resumen_consola(metricas.resumen()))
+    if cola.ultimo_error() is not None:
+        print(f"[aviso] transporte: {cola.ultimo_error()}", file=sys.stderr)
+    print(_resumen_control_consola(metricas_control.resumen()))
     print(f"eventos  : {ruta_eventos}")
     print(f"metricas  : {ruta_metricas}")
+    print(f"control   : {ruta_control}")
     return CODIGO_OK
 
 

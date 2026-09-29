@@ -15,8 +15,9 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from .configuracion import ParametrosConfiguracion
 from .maquina_estados import ResultadoEstado
-from .modelos import ResultadoProcesamiento
+from .modelos import ComandoMovimiento, DecisionCompuesta, ResultadoProcesamiento
 
 __all__ = ["anotar"]
 
@@ -29,6 +30,12 @@ _COLOR_VALIDO = (0, 220, 0)
 _COLOR_INVALIDO = (0, 140, 255)
 _COLOR_TEXTO = (255, 255, 255)
 _COLOR_FONDO_TEXTO = (0, 0, 0)
+_COLOR_OBJETIVO = (255, 255, 255)
+_COLOR_ZONA = (180, 180, 180)
+_COLOR_POSICION = (0, 255, 255)
+_COLOR_AVANZAR = (0, 220, 0)
+_COLOR_LATERAL = (0, 180, 255)
+_COLOR_DETENER = (0, 0, 255)
 
 
 def _superponer(anotada: np.ndarray, mascara: np.ndarray, color: tuple[int, int, int], alfa: float) -> None:
@@ -97,16 +104,86 @@ def _dibujar_estado(anotada: np.ndarray, estado: ResultadoEstado) -> None:
         _texto(anotada, linea, (8, anotada.shape[0] - 30 + 14 * numero))
 
 
+def _color_de_comando(comando: ComandoMovimiento) -> tuple[int, int, int]:
+    if comando is ComandoMovimiento.AVANZAR:
+        return _COLOR_AVANZAR
+    if comando is ComandoMovimiento.DETENER:
+        return _COLOR_DETENER
+    return _COLOR_LATERAL
+
+
+def _linea_vertical(anotada: np.ndarray, x: float, color: tuple[int, int, int], grosor: int) -> None:
+    alto = anotada.shape[0]
+    x_px = int(round(x))
+    if 0 <= x_px < anotada.shape[1]:
+        cv2.line(anotada, (x_px, 0), (x_px, alto - 1), color, grosor)
+
+
+def _dibujar_control(
+    anotada: np.ndarray,
+    resultado: ResultadoProcesamiento,
+    params: ParametrosConfiguracion,
+    decision: DecisionCompuesta | None,
+) -> None:
+    """Evidencia del control de trayectoria (T034, ``mapa-comandos.md`` §6).
+
+    Dibuja la referencia de centrado (``x_objetivo``), la zona muerta, la banda
+    de histéresis, la posición estimada y —si se pasa la decisión compuesta— el
+    comando final con su causa y la memoria de lado. Es material del póster
+    (criterios 9 y 10) y no participa en ninguna decisión.
+    """
+    ancho = anotada.shape[1]
+    x_objetivo = params.x_objetivo * ancho
+    zona = params.zona_muerta * ancho
+    histeresis = params.histeresis * ancho
+
+    _linea_vertical(anotada, x_objetivo, _COLOR_OBJETIVO, 1)
+    for x in (x_objetivo - zona, x_objetivo + zona):
+        _linea_vertical(anotada, x, _COLOR_ZONA, 1)
+    for x in (x_objetivo - zona - histeresis, x_objetivo + zona + histeresis):
+        cv2.line(
+            anotada,
+            (int(round(x)), 0),
+            (int(round(x)), anotada.shape[0] - 1),
+            _COLOR_ZONA,
+            1,
+            cv2.LINE_AA,
+        )
+
+    posicion = resultado.posicion
+    if posicion is not None and posicion.valida and posicion.x_px is not None:
+        _linea_vertical(anotada, posicion.x_px, _COLOR_POSICION, 2)
+        _texto(anotada, f"x={posicion.x_px:.0f} e={posicion.error_norm:+.2f}", (8, 40))
+
+    if decision is None:
+        return
+    comando = decision.comando
+    color = _color_de_comando(comando)
+    escala = 0.9 if comando is ComandoMovimiento.DETENER else 0.6
+    y = anotada.shape[0] - 52
+    cv2.putText(
+        anotada, str(comando), (8, y), cv2.FONT_HERSHEY_SIMPLEX, escala, _COLOR_FONDO_TEXTO, 4, cv2.LINE_AA
+    )
+    cv2.putText(anotada, str(comando), (8, y), cv2.FONT_HERSHEY_SIMPLEX, escala, color, 2, cv2.LINE_AA)
+    _texto(anotada, f"causa: {decision.causa}", (8, y + 18))
+
+
 def anotar(
     imagen_bgr: np.ndarray,
     resultado: ResultadoProcesamiento,
     estado: ResultadoEstado | None = None,
+    params: ParametrosConfiguracion | None = None,
+    decision: DecisionCompuesta | None = None,
 ) -> np.ndarray:
     """Devuelve una copia anotada del fotograma. No modifica la entrada ni guarda.
 
     ``cv2.putText`` no dibuja tildes ni caracteres fuera de ASCII, así que los
     rótulos del panel se escriben sin acentos; la causa de la decisión sí puede
     llevar el guion bajo de ``T_CUMPLIDO_CON_SIGA``.
+
+    ``params`` y ``decision`` son opcionales para no romper a los consumidores de
+    001: sin ellos se dibuja exactamente lo mismo que antes. Con ellos se añade
+    la evidencia del control de trayectoria (T034).
     """
     anotada = imagen_bgr.copy()
     segmentacion = resultado.segmentacion
@@ -115,6 +192,8 @@ def anotar(
     _superponer(anotada, segmentacion.mascara_verde, _COLOR_SIGA, _ALFA_SENAL)
     _dibujar_candidatos(anotada, resultado)
     _dibujar_confirmadas(anotada, resultado)
+    if params is not None:
+        _dibujar_control(anotada, resultado, params, decision)
     if estado is not None:
         _dibujar_estado(anotada, estado)
     return anotada

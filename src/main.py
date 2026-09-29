@@ -10,6 +10,7 @@ Uso::
     python -m src.main --fuente <ruta_video|directorio_imagenes|indice_camara>
                        [--config config/vision.json]
                        [--diagnostico]
+                       [--mostrar]
                        [--salida salidas/<corrida>]
                        [--max-fotogramas N]
                        [--anotacion refs.json]
@@ -25,7 +26,7 @@ import json
 import sys
 import threading
 import time
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -250,6 +251,118 @@ class _BombeoTransporte:
             self._parar.wait(self._intervalo_s)
 
 
+class _VentanaTkinter:
+    """Ventana tkinter que dibuja el último fotograma anotado.
+
+    tkinter es biblioteca estándar y funciona con la compilación
+    ``opencv-python-headless`` (que no trae ventanas propias). Todos los objetos
+    Tk viven en el hilo de ``_VentanaEnVivo``; ``dibujar`` reemplaza la imagen y
+    bombea los eventos para mantener la ventana viva y atendiendo al cierre.
+    """
+
+    def __init__(self, nombre: str, cerrar: threading.Event) -> None:
+        import tkinter as tk
+
+        self._tk = tk
+        self._raiz = tk.Tk()
+        self._raiz.title(nombre)
+        self._raiz.protocol("WM_DELETE_WINDOW", cerrar.set)
+        self._raiz.bind("<KeyPress-q>", lambda _evento: cerrar.set())
+        self._etiqueta = tk.Label(self._raiz)
+        self._etiqueta.pack()
+        self._imagen = None
+
+    def dibujar(self, fotograma: np.ndarray) -> None:
+        exito, png = cv2.imencode(".png", fotograma)
+        if not exito:
+            return
+        self._imagen = self._tk.PhotoImage(master=self._raiz, data=png.tobytes())
+        self._etiqueta.configure(image=self._imagen)
+        self._raiz.update()
+
+    def cerrar(self) -> None:
+        self._raiz.destroy()
+
+
+class _VentanaEnVivo:
+    """Muestra el último fotograma anotado en una ventana, en su propio hilo.
+
+    El bucle de visión solo llama a ``publicar`` (O(1), sin dibujar); el hilo
+    de la ventana dibuja el último fotograma recibido y descarta los que
+    lleguen mientras está ocupado, de modo que la ventana nunca frena la
+    detección (FR-031, SC-005). Cerrar la ventana (o pulsar ``q``) pide
+    terminar la corrida. ``renderizador`` permite inyectar un doble de prueba
+    sin abrir ventanas reales.
+    """
+
+    def __init__(
+        self,
+        nombre: str = "OptiPilot",
+        renderizador: Callable[..., object] | None = None,
+        intervalo_s: float = 0.01,
+    ) -> None:
+        self._nombre = nombre
+        self._renderizador = renderizador if renderizador is not None else _VentanaTkinter
+        self._intervalo_s = intervalo_s
+        self._lock = threading.Lock()
+        self._fotograma: np.ndarray | None = None
+        self._nuevo = threading.Event()
+        self._cerrar = threading.Event()
+        self._error: str | None = None
+        self._hilo = threading.Thread(target=self._bucle_ventana, name="ventana", daemon=True)
+
+    def iniciar(self) -> None:
+        self._hilo.start()
+
+    @property
+    def cierre_pedido(self) -> bool:
+        """True si el usuario cerró la ventana; no aplica si la ventana falló."""
+        return self._cerrar.is_set() and self._error is None
+
+    @property
+    def error(self) -> str | None:
+        """Mensaje del fallo del renderizador, si la ventana no pudo abrirse."""
+        return self._error
+
+    def publicar(self, fotograma: np.ndarray) -> None:
+        """Deja el fotograma más reciente para el hilo de la ventana."""
+        with self._lock:
+            self._fotograma = fotograma
+        self._nuevo.set()
+
+    def detener(self) -> None:
+        """Pide terminar al hilo de la ventana y espera su cierre."""
+        self._cerrar.set()
+        self._hilo.join(timeout=2.0)
+
+    def _tomar(self) -> np.ndarray | None:
+        with self._lock:
+            fotograma = self._fotograma
+            self._fotograma = None
+        return fotograma
+
+    def _bucle_ventana(self) -> None:
+        ventana = None
+        try:
+            ventana = self._renderizador(self._nombre, self._cerrar)
+            while not self._cerrar.is_set():
+                if not self._nuevo.wait(self._intervalo_s):
+                    continue
+                self._nuevo.clear()
+                fotograma = self._tomar()
+                if fotograma is not None:
+                    ventana.dibujar(fotograma)
+        except Exception as error:
+            self._error = str(error)
+            self._cerrar.set()
+        finally:
+            if ventana is not None:
+                try:
+                    ventana.cerrar()
+                except Exception:
+                    pass
+
+
 # -- corrida ---------------------------------------------------------------
 
 
@@ -324,14 +437,20 @@ def _correr(
     cola: ColaTransporte,
     transporte: Transporte,
     metricas_control: MetricasControl,
+    mostrar: bool = False,
 ) -> MetricasCorrida:
-    """Recorre la fuente componiendo pipeline, FSM, control, métricas y transporte."""
+    """Recorre la fuente componiendo pipeline, FSM, control, métricas, transporte
+    y —si ``mostrar``— una ventana en vivo con el fotograma anotado."""
     pipeline = PipelineVision(params)
     maquina = MaquinaEstados(params, t_inicial=0.0)
     metricas = MetricasCorrida(corrida_id=corrida_id, fuente=fuente)
 
     bombeo = _BombeoTransporte(cola, transporte)
     bombeo.iniciar()
+
+    vista = _VentanaEnVivo() if mostrar else None
+    if vista is not None:
+        vista.iniciar()
 
     frames = None
     if diagnostico:
@@ -397,13 +516,21 @@ def _correr(
                 )
                 inicio_parada = None
 
-            if frames is not None:
-                cv2.imwrite(
-                    str(frames / f"frame_{indice:06d}.png"),
-                    anotar(imagen, resultado, estado, params, decision),
-                )
+            if frames is not None or vista is not None:
+                anotada = anotar(imagen, resultado, estado, params, decision)
+                if frames is not None:
+                    cv2.imwrite(str(frames / f"frame_{indice:06d}.png"), anotada)
+                if vista is not None:
+                    vista.publicar(anotada)
+
+            if vista is not None and vista.cierre_pedido:
+                break
     finally:
         bombeo.detener()
+        if vista is not None:
+            vista.detener()
+            if vista.error is not None:
+                print(f"[aviso] ventana en vivo: {vista.error}", file=sys.stderr)
 
     return metricas
 
@@ -427,6 +554,11 @@ def _parsear_args(argv: Sequence[str] | None) -> argparse.Namespace:
         "--diagnostico",
         action="store_true",
         help="escribe fotogramas anotados por etapa (SC-012)",
+    )
+    analizador.add_argument(
+        "--mostrar",
+        action="store_true",
+        help="muestra la imagen anotada en vivo en una ventana ('q' o la X terminan)",
     )
     analizador.add_argument(
         "--salida",
@@ -494,6 +626,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cola=cola,
             transporte=transporte,
             metricas_control=metricas_control,
+            mostrar=args.mostrar,
         )
     except FuenteInvalidaError as error:
         print(f"[error] fuente invalida: {error}", file=sys.stderr)

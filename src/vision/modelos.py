@@ -164,7 +164,7 @@ class CandidatoSenal:
     def __post_init__(self) -> None:
         _exigir(self.area_px >= 0, "area_px debe ser >= 0")
         _exigir(self.area_rel >= 0, "area_rel debe ser >= 0")
-        _exigir(self.n_vertices >= 3, "n_vertices debe ser >= 3")
+        _exigir(self.n_vertices >= 1, "n_vertices debe ser >= 1")
         ancho, alto = self.caja_px[2], self.caja_px[3]
         _exigir(ancho > 0 and alto > 0, "la caja debe tener ancho y alto > 0")
         _exigir(self.aspecto > 0, "aspecto debe ser > 0")

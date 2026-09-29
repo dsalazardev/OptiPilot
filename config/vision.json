@@ -27,6 +27,6 @@
   "zona_muerta": 0.10,
   "histeresis": 0.03,
   "n_gracia_busqueda": 5,
-  "mac_bluetooth": "00:1B:10:21:2C:1B",
+  "mac_bluetooth": "f8:43:ef:13:05:37",
   "timeout_transporte_s": 0.20
 }

@@ -122,6 +122,18 @@ def test_cuadrado_rojo_es_candidato_invalido_por_vertices(segmentar, extraer) ->
     assert "vertices" in candidato.motivo_invalidez
 
 
+def test_franja_fina_no_rompe_y_es_candidato_invalido(segmentar, extraer) -> None:
+    imagen = crear_fondo()
+    cv2.rectangle(imagen, (120, 90), (520, 100), ROJO_BGR, thickness=-1)
+    candidatos = extraer(segmentar(imagen))
+    assert len(candidatos) == 1
+    candidato = candidatos[0]
+    assert candidato.es_valido is False
+    assert candidato.n_vertices < 3
+    assert candidato.motivo_invalidez is not None
+    assert "vertices" in candidato.motivo_invalidez
+
+
 def test_octagono_aplastado_invalido_por_aspecto(segmentar, extraer) -> None:
     imagen = crear_fondo()
     cv2.fillPoly(imagen, [_octagono_aplastado()], ROJO_BGR)

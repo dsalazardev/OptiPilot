@@ -366,7 +366,7 @@ serial `COM` port was our own invention and is gone.
 
 One byte per command, no header, no checksum, no delimiter. The link is
 `socket.AF_BLUETOOTH` + `SOCK_STREAM` + `BTPROTO_RFCOMM`, channel 1, to
-`mac_bluetooth` (default `00:1B:10:21:2C:1B`). `pyserial` was **removed** from
+`mac_bluetooth` (default `f8:43:ef:13:05:37`, el mBot del equipo). `pyserial` was **removed** from
 `pyproject.toml`; the robot link now has **zero** third-party dependencies.
 
 **Unverified assumption:** exactly one byte with no trailing newline, which fits a

@@ -115,7 +115,7 @@ N_GRACIA_BUSQUEDA_POR_DEFECTO = 5
 # del mBot del equipo; si se cambia de mBot se actualiza aquí. La
 # elección entre transporte real y simulado la hace el flag `--transporte` del
 # CLI, no la presencia de un valor en la configuración.
-MAC_BLUETOOTH_POR_DEFECTO = "f8:43:ef:13:05:37"
+MAC_BLUETOOTH_POR_DEFECTO = "00:1B:10:21:2D:C0"
 # Cota superior de una escritura bloqueada en el socket (antes `timeout_serial_s`,
 # renombrado porque ya no hay puerto serie: es un socket RFCOMM).
 TIMEOUT_TRANSPORTE_S_POR_DEFECTO = 0.20

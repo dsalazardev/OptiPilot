@@ -7,7 +7,7 @@ src/main.py, metricas.exportar() y visualizacion»*).
 
 Uso::
 
-    python -m src.main --fuente <ruta_video|directorio_imagenes|indice_camara>
+    python -m src.main --fuente <ruta_video|directorio_imagenes|indice_camara|url_droidcam>
                        [--config config/vision.json]
                        [--diagnostico]
                        [--mostrar]
@@ -46,6 +46,7 @@ from src.vision.maquina_estados import MaquinaEstados
 from src.vision.metricas import MetricasControl, MetricasCorrida
 from src.vision.modelos import (
     ClaseSenal,
+    ComandoMovimiento,
     EstadoRobot,
     MarcadorVisibilidadPlena,
     Parada,
@@ -67,8 +68,24 @@ class FuenteInvalidaError(ValueError):
 # -- fuente de fotogramas --------------------------------------------------
 
 
-def _es_indice_camara(fuente: str) -> bool:
-    return fuente.isdigit()
+#: Esquemas que se pasan tal cual a ``cv2.VideoCapture``. DroidCam por WiFi sirve
+#: el video del celular como URL —``http://IP:4747/video`` (MJPEG) o
+#: ``rtsp://IP:554/...``— y esas rutas no existen en el sistema de archivos.
+_ESQUEMAS_EN_VIVO = frozenset({"http", "https", "rtsp", "rtmp"})
+
+
+def _es_fuente_viva(fuente: str) -> bool:
+    """True si la fuente es una cámara: un índice (``0``) o una URL de red.
+
+    Sin esto, una URL de DroidCam caería en la rama de ``Path`` y el CLI la
+    reportaría como «la fuente no existe», aunque la cámara esté sirviendo. Un
+    archivo o un directorio existen en disco y nunca llevan esquema, así que la
+    distinción es inequívoca en los dos sentidos.
+    """
+    if fuente.isdigit():
+        return True
+    esquema = fuente.split("://", 1)[0].lower() if "://" in fuente else ""
+    return esquema in _ESQUEMAS_EN_VIVO
 
 
 def _abrir_video(ruta: Path) -> tuple[cv2.VideoCapture, float]:
@@ -92,11 +109,13 @@ def _iterar_fotogramas(
     ``t_s`` se deriva del índice y del fps para que la máquina de estados reciba
     tiempos reproducibles (el cronómetro T se calcula con ``t_s``, FR-017).
     """
-    if _es_indice_camara(fuente):
-        captura = cv2.VideoCapture(int(fuente))
+    if _es_fuente_viva(fuente):
+        # Un índice es un int; una URL se pasa como texto, sin reinterpretarla.
+        objetivo: int | str = int(fuente) if fuente.isdigit() else fuente
+        captura = cv2.VideoCapture(objetivo)
         if not captura.isOpened():
             captura.release()
-            raise FuenteInvalidaError(f"no se pudo abrir la cámara {fuente}")
+            raise FuenteInvalidaError(f"no se pudo abrir la fuente en vivo: {fuente}")
         fps = float(captura.get(cv2.CAP_PROP_FPS))
         if not np.isfinite(fps) or fps <= 0:
             fps = fps_por_defecto
@@ -525,7 +544,23 @@ def _correr(
 
             if vista is not None and vista.cierre_pedido:
                 break
+    except KeyboardInterrupt:
+        # Ctrl+C es una parada voluntaria del operador, no un fallo del sistema:
+        # se abandona el bucle y se devuelven las métricas acumuladas para que
+        # `main` las exporte. Sin esto, `metricas.exportar()` nunca se alcanzaba
+        # y una corrida de laboratorio terminaba sin resumen.
+        print(
+            "[aviso] interrumpido por el operador (Ctrl+C); se guardan las metricas",
+            file=sys.stderr,
+        )
     finally:
+        # Parada de seguridad. El robot no puede quedarse ejecutando el último
+        # comando (por ejemplo IZQUIERDA) cuando el operador cierra la ventana,
+        # pulsa `q` o interrumpe la corrida: seguiría girando hasta que lo
+        # apaguen a mano. Se encola ANTES de detener el bombeo para que el hilo
+        # de transporte todavía lo envíe; `bombeo.detener()` hace además un
+        # último drenaje.
+        cola.encolar(ComandoMovimiento.DETENER)
         bombeo.detener()
         if vista is not None:
             vista.detener()
@@ -543,7 +578,10 @@ def _parsear_args(argv: Sequence[str] | None) -> argparse.Namespace:
     analizador.add_argument(
         "--fuente",
         required=True,
-        help="ruta de video, directorio de imágenes o índice de cámara",
+        help=(
+            "ruta de video, directorio de imágenes, índice de cámara (0) "
+            "o URL de red de DroidCam (http://IP:4747/video, rtsp://IP:554/...)"
+        ),
     )
     analizador.add_argument(
         "--config",

@@ -14,7 +14,7 @@ import time
 import numpy as np
 import pytest
 
-from src.main import _ControlManual, _VentanaEnVivo
+from src.main import _ControlManual, _VentanaEnVivo, _iterar_captura
 from src.transporte.cola import ColaTransporte
 from src.transporte.simulado import TransporteSimulado
 from src.vision.modelos import ComandoMovimiento
@@ -203,3 +203,141 @@ def test_la_ventana_expone_el_modo_al_bucle_de_vision() -> None:
 
     vista.detener()
     assert registrados[0].cerrada is True
+
+
+# -- dead-man ------------------------------------------------------------
+
+
+def test_silencio_en_modo_manual_detiene_el_robot() -> None:
+    """El dead-man es el motivo de existir del modo manual con seguridad."""
+    cola = ColaTransporte()
+    transporte = TransporteSimulado()
+    control = _ControlManual(cola, deadman_s=0.15)
+    control.alternar_modo()
+    cola.drenar(transporte)
+
+    # El operador salió a buscar algo y no vuelve a mandar órdenes.
+    assert _esperar(lambda: cola.ultimo_enviado() is not None, 2.0), (
+        "el dead-man debió encolar DETENER tras el silencio"
+    )
+    cola.drenar(transporte)
+    assert cola.ultimo_enviado() is ComandoMovimiento.DETENER
+    control.pedir_cierre()
+
+
+def test_una_orden_de_movimiento_repone_el_margen() -> None:
+    """Teclear mantiene vivo el robot; el silencio posterior vuelve a parar."""
+    cola = ColaTransporte()
+    transporte = TransporteSimulado()
+    control = _ControlManual(cola, deadman_s=0.25)
+    control.alternar_modo()
+
+    # Con una orden reciente no debe dispararse el dead-man todavía.
+    control.interpretar("w")
+    time.sleep(0.1)
+    cola.drenar(transporte)
+    assert transporte.historial()[-1] is ComandoMovimiento.AVANZAR
+
+    # Y al soltar las teclas, sí.
+    assert _esperar(lambda: bool(cola.drenar(transporte)), 2.0)
+    assert cola.ultimo_enviado() is ComandoMovimiento.DETENER
+    control.pedir_cierre()
+
+
+def test_el_deadman_no_dispara_en_modo_autonomo() -> None:
+    """En autónomo manda la visión: el vigilante no debe interferir."""
+    cola = ColaTransporte()
+    transporte = TransporteSimulado()
+    control = _ControlManual(cola, deadman_s=0.1)
+    # Nunca se entra en modo manual.
+    time.sleep(0.3)
+    cola.drenar(transporte)
+    assert transporte.historial() == []
+    control.pedir_cierre()
+
+
+def test_salir_del_modo_manual_detiene_el_vigilante() -> None:
+    """Al volver a autónomo el vigilante muere: no puede parar a la visión."""
+    cola = ColaTransporte()
+    transporte = TransporteSimulado()
+    control = _ControlManual(cola, deadman_s=0.1)
+    control.alternar_modo()
+    control.alternar_modo()  # de vuelta a autónomo
+    assert control.manual_activo is False
+
+    time.sleep(0.3)
+    cola.drenar(transporte)
+    # Solo el DETENER de haber entrado en manual, nada del vigilante.
+    assert transporte.historial() == [ComandoMovimiento.DETENER]
+    control.pedir_cierre()
+
+
+def test_cerrar_libera_el_vigilante() -> None:
+    """``pedir_cierre`` no debe dejar un hilo vivo al final de la corrida."""
+    control = _ControlManual(ColaTransporte(), deadman_s=0.1)
+    control.alternar_modo()
+    control.pedir_cierre()
+    # Si el vigilante quedara vivo, join con timeoutExpired delataría el hilo.
+    control._detener_vigilante()
+
+
+# -- cronómetro real ----------------------------------------------------
+
+
+class _CapturaDoble:
+    """Captura falsa: devuelve N fotogramas y simula una entrega lenta."""
+
+    def __init__(self, total: int, espera_s: float) -> None:
+        self.total = total
+        self.espera_s = espera_s
+        self.leidos = 0
+
+    def read(self):
+        if self.leidos >= self.total:
+            return False, None
+        self.leidos += 1
+        if self.espera_s:
+            time.sleep(self.espera_s)
+        return True, np.full((4, 4, 3), self.leidos, dtype=np.uint8)
+
+
+def test_reloj_real_mide_el_tiempo_de_verdad() -> None:
+    """``t_s`` debe seguir al reloj, no al índice dividido por el fps."""
+    # 4 fotogramas a 30 fps nominales, pero entregados con 50 ms de retraso real:
+    # por índice saldrían 0.0, 0.033, 0.067, 0.100; por reloj, ~0.05, ~0.10, ...
+    captura = _CapturaDoble(total=4, espera_s=0.05)
+    tiempos = [t for _, t, _ in _iterar_captura(captura, 30.0, None, reloj_real=True)]
+
+    assert len(tiempos) == 4
+    assert tiempos[0] >= 0.05, f"el primer fotograma ya tardó 50 ms: {tiempos}"
+    # Si usara indice/fps, el último sería 3/30 = 0.1 s exactos.
+    assert tiempos[-1] >= 0.19, f"el reloj real no está midiendo la entrega: {tiempos}"
+    assert tiempos == sorted(tiempos), "el tiempo debe ser monótono"
+
+
+def test_reloj_de_video_sigue_usando_indice_sobre_fps() -> None:
+    """Sin ``reloj_real`` el tiempo es ``indice / fps``: las pruebas lo fijan."""
+    captura = _CapturaDoble(total=4, espera_s=0.05)
+    tiempos = [t for _, t, _ in _iterar_captura(captura, 30.0, None)]
+
+    assert tiempos == [0.0, 1 / 30, 2 / 30, 3 / 30]
+
+
+def test_el_parada_dura_t_segundos_reales_con_reloj_real() -> None:
+    """El requisito: T = 3.0 s deben ser 3 segundos reales en fuente viva."""
+    # 30 fps declarados pero 20 ms de retraso real: por índice, 6 fotogramas
+    # "valdrían" 0.2 s; por reloj, 6 fotogramas tardan ~0.12 s de más.
+    captura = _CapturaDoble(total=6, espera_s=0.02)
+    t_inicio = time.perf_counter()
+    tiempos = [t for _, t, _ in _iterar_captura(captura, 30.0, None, reloj_real=True)]
+    transcurrido = time.perf_counter() - t_inicio
+
+    assert tiempos[-1] >= 0.11, f"el reloj no capturó la latencia de entrega: {tiempos}"
+    # El error contra el reloj del proceso es el ruido de la propia medición.
+    assert abs(tiempos[-1] - transcurrido) < 0.02
+
+
+def test_max_fotogramas_no_ignora_el_reloj_real() -> None:
+    captura = _CapturaDoble(total=10, espera_s=0.0)
+    indices = [i for i, _, _ in _iterar_captura(captura, 30.0, 3, reloj_real=True)]
+    assert indices == [0, 1, 2]

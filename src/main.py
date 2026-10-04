@@ -119,8 +119,10 @@ def _iterar_fotogramas(
 ) -> Iterator[tuple[int, float, np.ndarray]]:
     """Itera ``(indice, t_s, imagen)`` desde un video, un directorio o una cámara.
 
-    ``t_s`` se deriva del índice y del fps para que la máquina de estados reciba
-    tiempos reproducibles (el cronómetro T se calcula con ``t_s``, FR-017).
+    Las fuentes en vivo usan reloj de pared (``reloj_real``) para que el
+    cronómetro T del PARE mida segundos reales; los archivos y directorios usan
+    ``indice / fps`` para que la máquina de estados reciba tiempos
+    reproducibles (FR-017).
     """
     if _es_fuente_viva(fuente):
         # Un índice es un int; una URL se pasa como texto, sin reinterpretarla.
@@ -133,7 +135,7 @@ def _iterar_fotogramas(
         if not np.isfinite(fps) or fps <= 0:
             fps = fps_por_defecto
         try:
-            yield from _iterar_captura(captura, fps, max_fotogramas)
+            yield from _iterar_captura(captura, fps, max_fotogramas, reloj_real=True)
         finally:
             captura.release()
         return
@@ -158,13 +160,30 @@ def _iterar_captura(
     captura: cv2.VideoCapture,
     fps: float,
     max_fotogramas: int | None,
+    reloj_real: bool = False,
 ) -> Iterator[tuple[int, float, np.ndarray]]:
+    """Itera los fotogramas de una captura abierta.
+
+    ``reloj_real`` mide el tiempo con ``time.perf_counter()`` en lugar de
+    ``indice / fps``. El índice y el fps solo son una aproximación del tiempo
+    transcurrido: si la cámara entrega los fotogramas más lento de lo que
+    declara —DroidCam por WiFi fluctúa, y el streamer puede ir por detrás de la
+    cámara— el cronómetro del PARE (T) se adelantaría o se atrasaría, y el
+    robot no se detendría el tiempo que el profesor pidió. Con ``reloj_real``
+    la parada dura segundos de verdad.
+
+    Los archivos y directorios siguen con ``indice / fps`` a propósito: sus
+    pruebas dependen de tiempos idénticos en cada ejecución (FR-017), y un reloj
+    de pared las volvería irreducibles.
+    """
     indice = 0
+    t_inicio = time.perf_counter()
     while max_fotogramas is None or indice < max_fotogramas:
         exito, imagen = captura.read()
         if not exito or imagen is None:
             return
-        yield indice, indice / fps, imagen
+        t_s = time.perf_counter() - t_inicio if reloj_real else indice / fps
+        yield indice, t_s, imagen
         indice += 1
 
 
@@ -304,6 +323,19 @@ _TECLAS_CIERRE = frozenset({"q", "escape"})
 _MODO_AUTONOMO = "AUTÓNOMO"
 _MODO_MANUAL = "MANUAL"
 
+#: Silencio tolerado en modo manual antes de detener el robot por seguridad.
+#: Es un *dead-man switch*: si el operador deja de mandar órdenes —se distrajo,
+#: se fue a buscar algo, dejó el teclado a la vista sin vigilarlo— el robot se
+#: para solo en lugar de quedarse siguiendo la última. 0.5 s es corto para que
+#: el robot no recorra medio metro extra, y largo para no castigar a un operador
+#: que está pensando cuál es la siguiente esquina.
+_DEADMAN_S = 0.5
+
+#: Granularidad con la que el vigilante despierta para comprobar el silencio. No
+#: es la precisión de la parada, solo el margen de retraso con que se detecta: el
+#: disparo real ocurre entre 0.5 s y 0.5 s + esta granularidad.
+_DEADMAN_MUESTREO_S = 0.05
+
 
 class _ControlManual:
     """Conmutador auto/manual y traducción de teclas a comandos de movimiento.
@@ -323,12 +355,28 @@ class _ControlManual:
     **Entrar en modo manual detiene el robot.** Sin esto el operador heredaría el
     último comando del pipeline («venía corrigiendo a la derecha») y creería que
     tiene el control cuando el robot sigue con la decisión anterior.
+
+    **Dead-man: el silencio también es una orden.** Entregar el control a una
+    persona es arriesgado por naturaleza: un modo manual sin vigilancia es un
+    robot que sigue la última tecla que alguien pulsó hace diez segundos. En
+    cuanto el operador deja de mandar órdenes de movimiento durante
+    ``deadman_s`` —se distrajo, se fue a buscar algo, dejó el teclado a la vista
+    sin vigilarlo— un vigilante en segundo plano encola ``DETENER``. Solo las
+    teclas de movimiento reponen el margen: pulsar ``m`` o cerrar la ventana no
+    cuenta como «sigo aquí», porque ninguna de las dos deja al robot en marcha.
     """
 
-    def __init__(self, cola: ColaTransporte | None) -> None:
+    def __init__(self, cola: ColaTransporte | None, deadman_s: float = _DEADMAN_S) -> None:
         self._cola = cola
+        self._deadman_s = deadman_s
         self._manual = threading.Event()
         self._cerrar = threading.Event()
+        # Estado del dead-man. `_ultima_orden` guarda un reloj monotónico, no el
+        # de pared: un ajuste de NTP puede mover el reloj de pared hacia atrás y
+        # armar el plazo en el futuro, retrasando la parada justo cuando importa.
+        self._ultima_orden = time.monotonic()
+        self._parar_vigilante = threading.Event()
+        self._vigilante: threading.Thread | None = None
 
     # -- estado ---------------------------------------------------------
 
@@ -351,12 +399,14 @@ class _ControlManual:
 
     def pedir_cierre(self) -> None:
         """Pide terminar la corrida. Los motores se detienen en el ``finally``."""
+        self._parar_vigilante.set()
         self._cerrar.set()
 
     def alternar_modo(self) -> str:
         """Conmuta el modo y devuelve la etiqueta nueva."""
         if self._manual.is_set():
             self._manual.clear()
+            self._detener_vigilante()
             nuevo = _MODO_AUTONOMO
         else:
             self._manual.set()
@@ -364,8 +414,66 @@ class _ControlManual:
             # El pipeline sigue calculando y midiendo, pero a partir de aquí no
             # transmite: el robot queda detenido hasta la primera tecla.
             self.enviar(ComandoMovimiento.DETENER)
+            self._arrancar_vigilante()
         print(f"[modo] {nuevo}", file=sys.stderr)
         return nuevo
+
+    # -- dead-man --------------------------------------------------------
+
+    def _arrancar_vigilante(self) -> None:
+        """Arranca el vigilante del modo manual, si no lo hay vivo.
+
+        Solo existe en modo manual: en autónomo manda el pipeline y el vigilante
+        podría detener el robot mientras la visión está corrigiendo, lo que sería
+        un fallo de seguridad falso.
+        """
+        if self._vigilante is not None and self._vigilante.is_alive():
+            return
+        self._ultima_orden = time.monotonic()
+        self._parar_vigilante.clear()
+        self._vigilante = threading.Thread(
+            target=self._bucle_vigilante, name="deadman", daemon=True
+        )
+        self._vigilante.start()
+
+    def _detener_vigilante(self) -> None:
+        """Termina el vigilante si lo hay vivo y espera a que salga."""
+        self._parar_vigilante.set()
+        vigilante, self._vigilante = self._vigilante, None
+        if vigilante is not None:
+            vigilante.join(timeout=1.0)
+
+    def _bucle_vigilante(self) -> None:
+        """Detiene el robot si ``deadman_s`` pasan sin orden de movimiento.
+
+        Corre en su propio hilo porque el del bucle de visión puede estar
+        bloqueado leyendo de la cámara, que es justo cuando más falta hace que
+        el robot se detenga. Nunca lanza: una excepción aquí dejaría el hilo
+        mudo y el dead-man desactivado sin que nadie lo note.
+        """
+        while not self._parar_vigilante.is_set():
+            if not self._manual.is_set():
+                return
+            silencio = time.monotonic() - self._ultima_orden
+            restante = self._deadman_s - silencio
+            if restante > 0:
+                # Espera el tiempo que falta en vez de un intervalo fijo: así el
+                # disparo cae en el plazo sin depender del muestreo.
+                if self._parar_vigilante.wait(min(restante, _DEADMAN_MUESTREO_S)):
+                    return
+                continue
+            try:
+                # Reponer el plazo evita reintentar en bucle. `enviar` deduplica
+                # en la cola, así que las repeticiones posteriores no salen por
+                # Bluetooth, pero no hace falta ni intentarlo.
+                self._ultima_orden = time.monotonic()
+                self.enviar(ComandoMovimiento.DETENER)
+                print(
+                    f"[dead-man] {self._deadman_s:.1f} s sin orden de movimiento: DETENER",
+                    file=sys.stderr,
+                )
+            except Exception as exc:  # pragma: no cover - red de seguridad
+                print(f"[dead-man] fallo al detener: {exc}", file=sys.stderr)
 
     def enviar(self, comando: ComandoMovimiento) -> bool:
         """Encola un comando manual. Sin cola (pruebas) es una no-op."""
@@ -400,6 +508,11 @@ class _ControlManual:
             # con él a mitad de una corrección.
             return f"{comando.name} ignorado (modo {_MODO_AUTONOMO})"
 
+        # Solo las órdenes de movimiento reponen el margen del dead-man. Parar
+        # con `x` tampoco lo repone: el robot ya está detenido, así que un
+        # disparo posterior del vigilante sería un `DETENER` redundante que la
+        # cola deduplica igual.
+        self._ultima_orden = time.monotonic()
         self.enviar(comando)
         return comando.name
 

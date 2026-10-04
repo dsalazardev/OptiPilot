@@ -17,6 +17,19 @@ Uso::
 
 Códigos de salida: ``0`` corrida completada, ``1`` error de ejecución,
 ``2`` configuración o fuente invalida.
+
+Control manual por teclado (``--mostrar``)
+-------------------------------------------
+La ventana captura ``<KeyPress>`` y traduce el ``keysym``; el modo activo se
+muestra en el título. ``m`` alterna entre ``AUTÓNOMO`` (manda el pipeline de
+visión, valor inicial) y ``MANUAL`` (manda el teclado). Las teclas de movimiento
+se ignoran en modo automático a propósito: son dos fuentes de verdad y en mitad
+de una corrección no debe ganar una tecla suelta.
+
+Las teclas se atienden en el hilo de la ventana y encolan directamente
+(``ColaTransporte.encolar`` es O(1), sin E/S), de modo que ni el operador ni el
+bucle de visión esperan al enlace ni al dibujado (SC-005, FR-031). El modo
+manual existe solo con ``--mostrar``: sin ventana no hay teclado que lo active.
 """
 
 from __future__ import annotations
@@ -270,6 +283,127 @@ class _BombeoTransporte:
             self._parar.wait(self._intervalo_s)
 
 
+#: Teclas que mueven el robot en modo manual. Los valores son ``keysym`` de
+#: tkinter en minúsculas: se comparan contra ``evento.keysym.lower()``, de modo
+#: que `w` y `W` caen en la misma entrada sin duplicar el mapa.
+_TECLAS_MOVIMIENTO: dict[str, ComandoMovimiento] = {
+    "w": ComandoMovimiento.AVANZAR,
+    "a": ComandoMovimiento.IZQUIERDA,
+    "d": ComandoMovimiento.DERECHA,
+    "x": ComandoMovimiento.DETENER,
+    "space": ComandoMovimiento.DETENER,
+}
+
+#: Tecla que alterna entre modo autónomo y modo manual.
+_TECLA_MODO = "m"
+
+#: Teclas que piden terminar la corrida. ``escape`` no tiene equivalente minúsculo
+#: pero se incluye para que la comparación sea uniforme.
+_TECLAS_CIERRE = frozenset({"q", "escape"})
+
+_MODO_AUTONOMO = "AUTÓNOMO"
+_MODO_MANUAL = "MANUAL"
+
+
+class _ControlManual:
+    """Conmutador auto/manual y traducción de teclas a comandos de movimiento.
+
+    **Quién manda.** En modo ``AUTÓNOMO`` (el inicial) el comando es el que
+    compone el pipeline de visión. En modo ``MANUAL`` el comando es el de la
+    última tecla pulsada. El bucle de visión consulta ``manual_activo`` en cada
+    fotograma para decidir si encola su veredicto; ese es todo el punto de
+    acoplamiento entre la ventana y el control.
+
+    **Por qué vive en el hilo de la ventana y no en el de visión.** Los eventos
+    de Tk se atienden en el hilo que creó el ``Tk``, y ``ColaTransporte.encolar``
+    es O(1) y hace la E/S fuera del lock. Encolar desde el manejador cumple los
+    dos requisitos a la vez: el operador no espera al enlace ni al dibujado, y el
+    bucle de visión nunca se frena por una tecla (SC-005, FR-031).
+
+    **Entrar en modo manual detiene el robot.** Sin esto el operador heredaría el
+    último comando del pipeline («venía corrigiendo a la derecha») y creería que
+    tiene el control cuando el robot sigue con la decisión anterior.
+    """
+
+    def __init__(self, cola: ColaTransporte | None) -> None:
+        self._cola = cola
+        self._manual = threading.Event()
+        self._cerrar = threading.Event()
+
+    # -- estado ---------------------------------------------------------
+
+    @property
+    def cerrar(self) -> threading.Event:
+        """Evento de terminación; lo consume ``_VentanaEnVivo``."""
+        return self._cerrar
+
+    @property
+    def manual_activo(self) -> bool:
+        """True si el operador tiene el control y manda el teclado."""
+        return self._manual.is_set()
+
+    @property
+    def modo(self) -> str:
+        """Etiqueta del modo activo, tal como se muestra en el título."""
+        return _MODO_MANUAL if self._manual.is_set() else _MODO_AUTONOMO
+
+    # -- acciones -------------------------------------------------------
+
+    def pedir_cierre(self) -> None:
+        """Pide terminar la corrida. Los motores se detienen en el ``finally``."""
+        self._cerrar.set()
+
+    def alternar_modo(self) -> str:
+        """Conmuta el modo y devuelve la etiqueta nueva."""
+        if self._manual.is_set():
+            self._manual.clear()
+            nuevo = _MODO_AUTONOMO
+        else:
+            self._manual.set()
+            nuevo = _MODO_MANUAL
+            # El pipeline sigue calculando y midiendo, pero a partir de aquí no
+            # transmite: el robot queda detenido hasta la primera tecla.
+            self.enviar(ComandoMovimiento.DETENER)
+        print(f"[modo] {nuevo}", file=sys.stderr)
+        return nuevo
+
+    def enviar(self, comando: ComandoMovimiento) -> bool:
+        """Encola un comando manual. Sin cola (pruebas) es una no-op."""
+        if self._cola is None:
+            return False
+        return self._cola.encolar(comando)
+
+    def interpretar(self, keysym: str) -> str | None:
+        """Traduce una tecla a la acción correspondiente.
+
+        Devuelve una descripción de lo hecho (para depurar por consola) o
+        ``None`` si la tecla no está mapeada. Nunca lanza: un manejador de
+        eventos que propaga excepciones rompe la ventana.
+        """
+        if not keysym:
+            return None
+        tecla = keysym.lower()
+
+        if tecla in _TECLAS_CIERRE:
+            self.pedir_cierre()
+            return "cerrar"
+
+        if tecla == _TECLA_MODO:
+            return f"modo {self.alternar_modo()}"
+
+        comando = _TECLAS_MOVIMIENTO.get(tecla)
+        if comando is None:
+            return None
+        if not self._manual.is_set():
+            # Ignorar en vez de transmitir evita dos fuentes de verdad: en modo
+            # autónomo el pipeline manda, y una tecla suelta no debe pelearse
+            # con él a mitad de una corrección.
+            return f"{comando.name} ignorado (modo {_MODO_AUTONOMO})"
+
+        self.enviar(comando)
+        return comando.name
+
+
 class _VentanaTkinter:
     """Ventana tkinter que dibuja el último fotograma anotado.
 
@@ -277,19 +411,45 @@ class _VentanaTkinter:
     ``opencv-python-headless`` (que no trae ventanas propias). Todos los objetos
     Tk viven en el hilo de ``_VentanaEnVivo``; ``dibujar`` reemplaza la imagen y
     bombea los eventos para mantener la ventana viva y atendiendo al cierre.
+
+    **Una sola captura, genérica.** Se enlaza ``<KeyPress>`` en vez de una tecla
+    por binding: ``evento.keysym`` trae el carácter ya resuelto, así que un
+    ``<KeyPress-w>`` no dispara con `W` y habría que duplicar cada mapa. Además
+    ``space`` y ``escape`` no son teclas de carácter y no se podrían expresar con
+    esa sintaxis.
     """
 
-    def __init__(self, nombre: str, cerrar: threading.Event) -> None:
+    def __init__(self, nombre: str, control: "_ControlManual") -> None:
         import tkinter as tk
 
         self._tk = tk
+        self._control = control
+        self._nombre = nombre
         self._raiz = tk.Tk()
-        self._raiz.title(nombre)
-        self._raiz.protocol("WM_DELETE_WINDOW", cerrar.set)
-        self._raiz.bind("<KeyPress-q>", lambda _evento: cerrar.set())
+        self._raiz.title(self._titulo())
+        self._raiz.protocol("WM_DELETE_WINDOW", control.pedir_cierre)
+        self._raiz.bind("<KeyPress>", self._al_presionar)
         self._etiqueta = tk.Label(self._raiz)
         self._etiqueta.pack()
         self._imagen = None
+        # Sin foco la ventana no recibe teclas hasta que se la cliqueza, y en una
+        # prueba frente al profesor eso se lee como "el teclado no funciona".
+        try:
+            self._raiz.focus_force()
+        except tk.TclError:
+            pass
+
+    def _titulo(self) -> str:
+        return f"{self._nombre}  [{self._control.modo}]"
+
+    def _al_presionar(self, evento) -> None:
+        """Traduce la tecla y refresca el título con el modo vigente."""
+        descripcion = self._control.interpretar(str(evento.keysym))
+        if descripcion is not None:
+            print(f"[tecla] {evento.keysym}: {descripcion}", file=sys.stderr)
+        # El modo puede haber cambiado con `m`, así que el título se recalcula en
+        # cada pulsación: es una operación trivial frente a dibujar un fotograma.
+        self._raiz.title(self._titulo())
 
     def dibujar(self, fotograma: np.ndarray) -> None:
         exito, png = cv2.imencode(".png", fotograma)
@@ -309,24 +469,30 @@ class _VentanaEnVivo:
     El bucle de visión solo llama a ``publicar`` (O(1), sin dibujar); el hilo
     de la ventana dibuja el último fotograma recibido y descarta los que
     lleguen mientras está ocupado, de modo que la ventana nunca frena la
-    detección (FR-031, SC-005). Cerrar la ventana (o pulsar ``q``) pide
-    terminar la corrida. ``renderizador`` permite inyectar un doble de prueba
-    sin abrir ventanas reales.
+    detección (FR-031, SC-005). Cerrar la ventana, pulsar ``q``/``Q``/``Escape``
+    pide terminar la corrida. ``renderizador`` permite inyectar un doble de
+    prueba sin abrir ventanas reales.
+
+    **Es también el dueño de ``_ControlManual``** porque el modo manual se
+    alcanza por teclado, y sin ventana no hay teclado: el modo manual existe
+    únicamente con ``--mostrar``. El bucle de visión lee ``manual_activo`` para
+    saber si encolar su veredicto o dejarlo en manos del operador.
     """
 
     def __init__(
         self,
         nombre: str = "OptiPilot",
+        cola: ColaTransporte | None = None,
         renderizador: Callable[..., object] | None = None,
         intervalo_s: float = 0.01,
     ) -> None:
         self._nombre = nombre
+        self._control = _ControlManual(cola)
         self._renderizador = renderizador if renderizador is not None else _VentanaTkinter
         self._intervalo_s = intervalo_s
         self._lock = threading.Lock()
         self._fotograma: np.ndarray | None = None
         self._nuevo = threading.Event()
-        self._cerrar = threading.Event()
         self._error: str | None = None
         self._hilo = threading.Thread(target=self._bucle_ventana, name="ventana", daemon=True)
 
@@ -334,9 +500,19 @@ class _VentanaEnVivo:
         self._hilo.start()
 
     @property
+    def control(self) -> _ControlManual:
+        """Control manual compartido; lo usan la ventana y el bucle de visión."""
+        return self._control
+
+    @property
+    def manual_activo(self) -> bool:
+        """True si el operador maneja el robot con el teclado."""
+        return self._control.manual_activo
+
+    @property
     def cierre_pedido(self) -> bool:
         """True si el usuario cerró la ventana; no aplica si la ventana falló."""
-        return self._cerrar.is_set() and self._error is None
+        return self._control.cerrar.is_set() and self._error is None
 
     @property
     def error(self) -> str | None:
@@ -351,7 +527,7 @@ class _VentanaEnVivo:
 
     def detener(self) -> None:
         """Pide terminar al hilo de la ventana y espera su cierre."""
-        self._cerrar.set()
+        self._control.pedir_cierre()
         self._hilo.join(timeout=2.0)
 
     def _tomar(self) -> np.ndarray | None:
@@ -363,8 +539,8 @@ class _VentanaEnVivo:
     def _bucle_ventana(self) -> None:
         ventana = None
         try:
-            ventana = self._renderizador(self._nombre, self._cerrar)
-            while not self._cerrar.is_set():
+            ventana = self._renderizador(self._nombre, self._control)
+            while not self._control.cerrar.is_set():
                 if not self._nuevo.wait(self._intervalo_s):
                     continue
                 self._nuevo.clear()
@@ -373,7 +549,7 @@ class _VentanaEnVivo:
                     ventana.dibujar(fotograma)
         except Exception as error:
             self._error = str(error)
-            self._cerrar.set()
+            self._control.pedir_cierre()
         finally:
             if ventana is not None:
                 try:
@@ -467,7 +643,7 @@ def _correr(
     bombeo = _BombeoTransporte(cola, transporte)
     bombeo.iniciar()
 
-    vista = _VentanaEnVivo() if mostrar else None
+    vista = _VentanaEnVivo(cola=cola) if mostrar else None
     if vista is not None:
         vista.iniciar()
 
@@ -521,7 +697,12 @@ def _correr(
             decision = pipeline.componer(resultado, estado.decision)
             latencia_decision_ms = (time.perf_counter() - t_inicio_fotograma) * 1000.0
             metricas_control.registrar(decision, latencia_decision_ms)
-            cola.encolar(decision.comando)
+            # El veredicto del pipeline se calcula y se mide siempre, también en
+            # modo manual: es lo que permite comparar en la demo qué haría el
+            # automático frente a lo que está haciendo el operador. Lo que se
+            # suspende es solo la transmisión, no la observación.
+            if vista is None or not vista.manual_activo:
+                cola.encolar(decision.comando)
 
             if inicio_parada is None and estado.estado is not EstadoRobot.EN_MARCHA:
                 inicio_parada = t_s
@@ -596,7 +777,12 @@ def _parsear_args(argv: Sequence[str] | None) -> argparse.Namespace:
     analizador.add_argument(
         "--mostrar",
         action="store_true",
-        help="muestra la imagen anotada en vivo en una ventana ('q' o la X terminan)",
+        help=(
+            "muestra la imagen anotada en vivo y activa el control por teclado. "
+            "En modo AUTÓNOMO manda el pipeline; con 'm' se pasa a MANUAL, donde "
+            "'w' avanza, 'a'/'d' corrigen, 'x' o espacio detienen, y "
+            "'q'/'Q'/Escape terminan la corrida"
+        ),
     )
     analizador.add_argument(
         "--salida",

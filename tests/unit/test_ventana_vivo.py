@@ -10,11 +10,14 @@ from __future__ import annotations
 
 import threading
 import time
+import types
+from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
-from src.main import _ControlManual, _VentanaEnVivo, _iterar_captura
+from src.main import _ControlManual, _VentanaEnVivo, _VentanaTkinter, _iterar_captura
 from src.transporte.cola import ColaTransporte
 from src.transporte.simulado import TransporteSimulado
 from src.vision.modelos import ComandoMovimiento
@@ -341,3 +344,147 @@ def test_max_fotogramas_no_ignora_el_reloj_real() -> None:
     captura = _CapturaDoble(total=10, espera_s=0.0)
     indices = [i for i, _, _ in _iterar_captura(captura, 30.0, 3, reloj_real=True)]
     assert indices == [0, 1, 2]
+
+
+# -- captura de pantalla ------------------------------------------------
+
+
+def test_capturar_sin_fotograma_no_falla() -> None:
+    """Pulsar `c` antes del primer fotograma no debe tumbar la ventana."""
+    control = _ControlManual(ColaTransporte(), directorio_capturas=Path("salidas"))
+    assert "sin fotograma" in control.interpretar("c")
+
+
+@pytest.mark.parametrize("tecla", ["c", "C"])
+def test_tecla_c_guarda_el_fotograma_actual(tecla: str, tmp_path: Path) -> None:
+    control = _ControlManual(ColaTransporte(), directorio_capturas=tmp_path / "capturas")
+    esperado = _fotograma(200)
+    control.registrar_fotograma(esperado)
+
+    control.interpretar(tecla)
+
+    guardados = list((tmp_path / "capturas").glob("captura_*.png"))
+    assert len(guardados) == 1, guardados
+    assert guardados[0].name.startswith("captura_")
+    # La marca de tiempo debe ser YYYYMMDD_HHMMSS: 8 dígitos, guion, 6 dígitos.
+    sello = guardados[0].stem.removeprefix("captura_")
+    assert len(sello) == 15 and sello[8] == "_"
+    assert sello[:8].isdigit() and sello[9:].isdigit()
+
+    # Lo guardado es el fotograma anotado, no una versión recortada o reescalada.
+    guardado = cv2.imread(str(guardados[0]))
+    assert guardado.shape == esperado.shape
+    assert np.array_equal(guardado, esperado)
+
+
+def test_capturar_crea_el_directorio_si_no_existe(tmp_path: Path) -> None:
+    destino = tmp_path / "no" / "existia" / "capturas"
+    control = _ControlManual(ColaTransporte(), directorio_capturas=destino)
+    control.registrar_fotograma(_fotograma(10))
+
+    control.capturar_fotograma()
+
+    assert destino.is_dir()
+    assert len(list(destino.glob("captura_*.png"))) == 1
+
+
+def test_capturar_no_toca_el_robot_ni_el_margen_del_deadman(tmp_path: Path) -> None:
+    """Capturar es una lectura: no encola comandos ni repone el dead-man."""
+    cola = ColaTransporte()
+    transporte = TransporteSimulado()
+    control = _ControlManual(cola, deadman_s=5.0, directorio_capturas=tmp_path)
+    control.alternar_modo()
+    cola.drenar(transporte)
+    control.registrar_fotograma(_fotograma(7))
+
+    antes = control._ultima_orden
+    control.interpretar("c")
+
+    cola.drenar(transporte)
+    assert transporte.historial() == [ComandoMovimiento.DETENER], transporte.historial()
+    assert control._ultima_orden == antes
+    control.pedir_cierre()
+
+
+def test_capturar_devuelve_la_ruta_para_la_consola(tmp_path: Path) -> None:
+    control = _ControlManual(ColaTransporte(), directorio_capturas=tmp_path)
+    control.registrar_fotograma(_fotograma(1))
+
+    descripcion = control.capturar_fotograma()
+
+    # El mensaje va también a la consola, y `interpretar` lo devuelve para el
+    # log de teclas: no debe depender de una ni de otra.
+    assert descripcion.startswith("captura guardada en ")
+    assert (tmp_path / descripcion.removeprefix("captura guardada en ")).is_file()
+
+
+# -- el renderizador real alimenta la captura ---------------------------
+
+
+def _tkinter_falso(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Sustituye ``tkinter`` por dobles: se prueba el cableado, no Tk."""
+    import tkinter as tk
+
+    estado: dict = {}
+
+    class _Raiz:
+        def __init__(self) -> None:
+            estado["titulo"] = None
+            estado["handlers"] = {}
+
+        def title(self, texto: str) -> None:
+            estado["titulo"] = texto
+
+        def protocol(self, nombre, fn) -> None:
+            estado["handlers"][nombre] = fn
+
+        def bind(self, secuencia, fn) -> None:
+            estado["handlers"][secuencia] = fn
+
+        def focus_force(self) -> None:
+            pass
+
+        def update(self) -> None:
+            pass
+
+        def destroy(self) -> None:
+            pass
+
+    class _Etiqueta:
+        def __init__(self, raiz) -> None:
+            pass
+
+        def pack(self) -> None:
+            pass
+
+        def configure(self, image=None) -> None:
+            pass
+
+    class _TclError(Exception):
+        pass
+
+    monkeypatch.setattr(tk, "Tk", _Raiz)
+    monkeypatch.setattr(tk, "Label", _Etiqueta)
+    monkeypatch.setattr(tk, "TclError", _TclError)
+    monkeypatch.setattr(tk, "PhotoImage", lambda **kw: object())
+    monkeypatch.setattr(tk, "StringVar", lambda value="": types.SimpleNamespace(get=lambda: value))
+    return estado
+
+
+def test_el_visor_real_registra_lo_que_dibuja(monkeypatch, tmp_path: Path) -> None:
+    """`c` debe guardar lo que está en pantalla, no otro fotograma."""
+    estado = _tkinter_falso(monkeypatch)
+    control = _ControlManual(ColaTransporte(), directorio_capturas=tmp_path)
+    ventana = _VentanaTkinter("OptiPilot", control)
+
+    # Antes de dibujar no hay nada que capturar.
+    assert "sin fotograma" in ventana._control.capturar_fotograma()
+
+    esperado = _fotograma(123)
+    ventana.dibujar(esperado)
+    control.capturar_fotograma()
+
+    guardados = list(tmp_path.glob("captura_*.png"))
+    assert len(guardados) == 1, guardados
+    assert np.array_equal(cv2.imread(str(guardados[0])), esperado)
+    assert estado["handlers"], "la ventana debe enlazar sus manejadores"

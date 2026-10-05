@@ -322,6 +322,9 @@ _TECLAS_CIERRE = frozenset({"q", "escape"})
 
 _MODO_AUTONOMO = "AUTÓNOMO"
 _MODO_MANUAL = "MANUAL"
+#: Tecla de captura de pantalla. Es una lectura, no una orden: funciona igual en
+#: los dos modos y no toca el robot.
+_TECLA_CAPTURA = "c"
 
 #: Silencio tolerado en modo manual antes de detener el robot por seguridad.
 #: Es un *dead-man switch*: si el operador deja de mandar órdenes —se distrajo,
@@ -366,7 +369,12 @@ class _ControlManual:
     cuenta como «sigo aquí», porque ninguna de las dos deja al robot en marcha.
     """
 
-    def __init__(self, cola: ColaTransporte | None, deadman_s: float = _DEADMAN_S) -> None:
+    def __init__(
+        self,
+        cola: ColaTransporte | None,
+        deadman_s: float = _DEADMAN_S,
+        directorio_capturas: Path | None = None,
+    ) -> None:
         self._cola = cola
         self._deadman_s = deadman_s
         self._manual = threading.Event()
@@ -377,6 +385,11 @@ class _ControlManual:
         self._ultima_orden = time.monotonic()
         self._parar_vigilante = threading.Event()
         self._vigilante: threading.Thread | None = None
+        # Último fotograma que la ventana mostró, para la tecla de captura.
+        self._ultimo_fotograma: np.ndarray | None = None
+        self._directorio_capturas = (
+            directorio_capturas if directorio_capturas is not None else Path("salidas") / "capturas"
+        )
 
     # -- estado ---------------------------------------------------------
 
@@ -475,6 +488,43 @@ class _ControlManual:
             except Exception as exc:  # pragma: no cover - red de seguridad
                 print(f"[dead-man] fallo al detener: {exc}", file=sys.stderr)
 
+    # -- captura de pantalla --------------------------------------------
+
+    def registrar_fotograma(self, fotograma: np.ndarray) -> None:
+        """Guarda el fotograma que la ventana está mostrando.
+
+        Lo llama ``_VentanaTkinter.dibujar`` justo antes de pintarlo. No hace
+        falta candado porque ``dibujar`` y el manejador de teclas corren en el
+        mismo hilo: el fotograma que se guarda es exactamente el que el operador
+        ve cuando pulsa la tecla, no el que llega después.
+        """
+        self._ultimo_fotograma = fotograma
+
+    def capturar_fotograma(self) -> str:
+        """Guarda el fotograma actual en disco y devuelve la ruta.
+
+        Sirve para dejar constancia de un estado concreto del robot —el momento
+        en que la línea se perdió, en que aparece una señal, en que el operador
+        toma el control— sin tener que reconstruirlo después desde el video.
+
+        El nombre lleva marca de tiempo para que las capturas se ordenen solas.
+        Dos capturas dentro del mismo segundo comparten nombre y la segunda
+        sobrescribe a la primera; a velocidad de dedo humano es improbable, y
+        prefiero un nombre limpio antes que un sufijo que hay que explicar.
+        """
+        fotograma = self._ultimo_fotograma
+        if fotograma is None:
+            return "sin fotograma que capturar todavía"
+        self._directorio_capturas.mkdir(parents=True, exist_ok=True)
+        nombre = f"captura_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        ruta = self._directorio_capturas / nombre
+        if not cv2.imwrite(str(ruta), fotograma):
+            return f"no se pudo escribir {ruta.as_posix()}"
+        # `as_posix` para que el mensaje sea el mismo en Windows y en Linux; la
+        # rúbrica y el póster citan rutas con `/`.
+        print(f"[Captura guardada en {ruta.as_posix()}]", file=sys.stderr)
+        return f"captura guardada en {ruta.as_posix()}"
+
     def enviar(self, comando: ComandoMovimiento) -> bool:
         """Encola un comando manual. Sin cola (pruebas) es una no-op."""
         if self._cola is None:
@@ -498,6 +548,12 @@ class _ControlManual:
 
         if tecla == _TECLA_MODO:
             return f"modo {self.alternar_modo()}"
+
+        if tecla == _TECLA_CAPTURA:
+            # Va antes del mapa de movimiento a propósito: capturar no es mover,
+            # así que no debe reponer el margen del dead-man. Guardar una prueba
+            # mientras el robot roda no cuenta como «sigo vigilando».
+            return self.capturar_fotograma()
 
         comando = _TECLAS_MOVIMIENTO.get(tecla)
         if comando is None:
@@ -568,6 +624,9 @@ class _VentanaTkinter:
         exito, png = cv2.imencode(".png", fotograma)
         if not exito:
             return
+        # Antes de pintarlo, para que la tecla de captura guarde justo lo que el
+        # operador tiene delante de los ojos.
+        self._control.registrar_fotograma(fotograma)
         self._imagen = self._tk.PhotoImage(master=self._raiz, data=png.tobytes())
         self._etiqueta.configure(image=self._imagen)
         self._raiz.update()
@@ -894,7 +953,8 @@ def _parsear_args(argv: Sequence[str] | None) -> argparse.Namespace:
             "muestra la imagen anotada en vivo y activa el control por teclado. "
             "En modo AUTÓNOMO manda el pipeline; con 'm' se pasa a MANUAL, donde "
             "'w' avanza, 'a'/'d' corrigen, 'x' o espacio detienen, y "
-            "'q'/'Q'/Escape terminan la corrida"
+            "'q'/'Q'/Escape terminan la corrida. 'c' guarda el fotograma actual "
+            "en salidas/capturas/"
         ),
     )
     analizador.add_argument(

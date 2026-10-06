@@ -36,6 +36,12 @@ _COLOR_POSICION = (0, 255, 255)
 _COLOR_AVANZAR = (0, 220, 0)
 _COLOR_LATERAL = (0, 180, 255)
 _COLOR_DETENER = (0, 0, 255)
+_COLOR_MANUAL = (0, 165, 255)
+_COLOR_AUTO = (0, 255, 0)
+
+#: Recordatorio de teclas para la demostración en vivo (se dibuja abajo a la
+#: derecha). Sin esto, en plena pista nadie recuerda el mapa de teclas.
+_AYUDA_TECLAS = "m modo | w a d mover | x detener | c captura | q salir"
 
 
 def _superponer(anotada: np.ndarray, mascara: np.ndarray, color: tuple[int, int, int], alfa: float) -> None:
@@ -119,11 +125,62 @@ def _linea_vertical(anotada: np.ndarray, x: float, color: tuple[int, int, int], 
         cv2.line(anotada, (x_px, 0), (x_px, alto - 1), color, grosor)
 
 
+def _flecha_direccion(anotada: np.ndarray, comando: ComandoMovimiento) -> None:
+    """Flecha grande en el centro: de un vistazo, hacia dónde va el robot.
+
+    Es lo primero que mira el público en la demo, así que va centrada y gruesa.
+    ``DETENER`` no es una dirección: se dibuja como un aspa para que se distinga
+    de un giro.
+    """
+    alto, ancho = anotada.shape[:2]
+    cx, cy = ancho // 2, int(alto * 0.66)
+    largo = int(min(ancho, alto) * 0.15)
+    grosor = max(5, int(min(ancho, alto) * 0.012))
+    color = _color_de_comando(comando)
+
+    if comando is ComandoMovimiento.DETENER:
+        cv2.line(anotada, (cx - largo, cy - largo), (cx + largo, cy + largo), color, grosor, cv2.LINE_AA)
+        cv2.line(anotada, (cx - largo, cy + largo), (cx + largo, cy - largo), color, grosor, cv2.LINE_AA)
+        return
+
+    destinos = {
+        ComandoMovimiento.AVANZAR: (cx, cy - largo),
+        ComandoMovimiento.IZQUIERDA: (cx - largo, cy),
+        ComandoMovimiento.DERECHA: (cx + largo, cy),
+    }
+    destino = destinos.get(comando)
+    if destino is None:
+        return
+    cv2.arrowedLine(anotada, (cx, cy), destino, color, grosor, cv2.LINE_AA, tipLength=0.35)
+
+
+def _banner_modo(anotada: np.ndarray, modo: str | None) -> None:
+    """Banda superior con el modo vigente, para no confundir AUTO con MANUAL."""
+    if modo is None:
+        return
+    texto = f"MODO: {modo}"
+    color = _COLOR_MANUAL if modo == "MANUAL" else _COLOR_AUTO
+    (ancho_texto, alto_texto), _ = cv2.getTextSize(texto, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+    cv2.rectangle(anotada, (6, 6), (18 + ancho_texto, 18 + alto_texto), _COLOR_FONDO_TEXTO, -1)
+    cv2.putText(
+        anotada, texto, (12, 14 + alto_texto), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA
+    )
+
+
+def _ayuda_teclas(anotada: np.ndarray) -> None:
+    """Recordatorio de teclas, abajo a la derecha."""
+    (ancho_texto, _), _ = cv2.getTextSize(_AYUDA_TECLAS, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
+    x = max(0, anotada.shape[1] - ancho_texto - 10)
+    _texto(anotada, _AYUDA_TECLAS, (x, anotada.shape[0] - 10))
+
+
 def _dibujar_control(
     anotada: np.ndarray,
     resultado: ResultadoProcesamiento,
     params: ParametrosConfiguracion,
     decision: DecisionCompuesta | None,
+    comando_mostrado: ComandoMovimiento | None = None,
+    modo: str | None = None,
 ) -> None:
     """Evidencia del control de trayectoria (T034, ``mapa-comandos.md`` §6).
 
@@ -155,9 +212,16 @@ def _dibujar_control(
         _linea_vertical(anotada, posicion.x_px, _COLOR_POSICION, 2)
         _texto(anotada, f"x={posicion.x_px:.0f} e={posicion.error_norm:+.2f}", (8, 40))
 
-    if decision is None:
+    comando = (
+        comando_mostrado
+        if comando_mostrado is not None
+        else (decision.comando if decision is not None else None)
+    )
+    if comando is None:
+        _banner_modo(anotada, modo)
+        _ayuda_teclas(anotada)
         return
-    comando = decision.comando
+    _flecha_direccion(anotada, comando)
     color = _color_de_comando(comando)
     escala = 0.9 if comando is ComandoMovimiento.DETENER else 0.6
     y = anotada.shape[0] - 52
@@ -165,7 +229,10 @@ def _dibujar_control(
         anotada, str(comando), (8, y), cv2.FONT_HERSHEY_SIMPLEX, escala, _COLOR_FONDO_TEXTO, 4, cv2.LINE_AA
     )
     cv2.putText(anotada, str(comando), (8, y), cv2.FONT_HERSHEY_SIMPLEX, escala, color, 2, cv2.LINE_AA)
-    _texto(anotada, f"causa: {decision.causa}", (8, y + 18))
+    if decision is not None:
+        _texto(anotada, f"causa: {decision.causa}", (8, y + 18))
+    _banner_modo(anotada, modo)
+    _ayuda_teclas(anotada)
 
 
 def anotar(
@@ -174,6 +241,8 @@ def anotar(
     estado: ResultadoEstado | None = None,
     params: ParametrosConfiguracion | None = None,
     decision: DecisionCompuesta | None = None,
+    comando_mostrado: ComandoMovimiento | None = None,
+    modo: str | None = None,
 ) -> np.ndarray:
     """Devuelve una copia anotada del fotograma. No modifica la entrada ni guarda.
 
@@ -184,6 +253,10 @@ def anotar(
     ``params`` y ``decision`` son opcionales para no romper a los consumidores de
     001: sin ellos se dibuja exactamente lo mismo que antes. Con ellos se añade
     la evidencia del control de trayectoria (T034).
+
+    ``comando_mostrado`` permite pintar una orden distinta a la de ``decision``:
+    en modo MANUAL el robot obedece al teclado, así que el visor debe dibujar esa
+    orden y no la que el pipeline habría tomado. ``modo`` rotula AUTO/MANUAL.
     """
     anotada = imagen_bgr.copy()
     segmentacion = resultado.segmentacion
@@ -193,7 +266,7 @@ def anotar(
     _dibujar_candidatos(anotada, resultado)
     _dibujar_confirmadas(anotada, resultado)
     if params is not None:
-        _dibujar_control(anotada, resultado, params, decision)
+        _dibujar_control(anotada, resultado, params, decision, comando_mostrado, modo)
     if estado is not None:
         _dibujar_estado(anotada, estado)
     return anotada

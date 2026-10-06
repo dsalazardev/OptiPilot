@@ -73,18 +73,41 @@ CODIGO_ENTRADA_INVALIDA = 2
 
 _EXTENSIONES_IMAGEN = frozenset({".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"})
 
-
 class FuenteInvalidaError(ValueError):
     """La fuente de fotogramas no existe, no se puede abrir o está vacía."""
 
-
 # -- fuente de fotogramas --------------------------------------------------
-
 
 #: Esquemas que se pasan tal cual a ``cv2.VideoCapture``. DroidCam por WiFi sirve
 #: el video del celular como URL —``http://IP:4747/video`` (MJPEG) o
 #: ``rtsp://IP:554/...``— y esas rutas no existen en el sistema de archivos.
 _ESQUEMAS_EN_VIVO = frozenset({"http", "https", "rtsp", "rtmp"})
+
+#: Rotaciones que se pueden pedir con ``--rotar`` para enderezar la cámara en
+#: vivo. El celular se monta **vertical**, pero DroidCam entrega el stream en
+#: horizontal (1280x720 medido), así que por defecto se rota 90° en sentido
+#: horario para que el ROI —calibrado en vertical— aplique tal cual.
+_ROTACIONES: dict[str, int | None] = {
+    "horario": cv2.ROTATE_90_CLOCKWISE,
+    "antihorario": cv2.ROTATE_90_COUNTERCLOCKWISE,
+    "180": cv2.ROTATE_180,
+    "ninguna": None,
+}
+
+#: Rotación por defecto para las fuentes en vivo.
+_ROTACION_POR_DEFECTO = "horario"
+
+
+def _orientar(imagen: np.ndarray, rotacion: int | None) -> np.ndarray:
+    """Endereza la imagen. Con ``rotacion`` nula, la devuelve intacta.
+
+    Solo se aplica a fuentes en vivo: los videos y directorios de prueba ya están
+    en la orientación con la que se calibró todo y rotarlos volvería irreducibles
+    las pruebas de geometría.
+    """
+    if rotacion is None:
+        return imagen
+    return cv2.rotate(imagen, rotacion)
 
 
 def _es_fuente_viva(fuente: str) -> bool:
@@ -100,7 +123,6 @@ def _es_fuente_viva(fuente: str) -> bool:
     esquema = fuente.split("://", 1)[0].lower() if "://" in fuente else ""
     return esquema in _ESQUEMAS_EN_VIVO
 
-
 def _abrir_video(ruta: Path) -> tuple[cv2.VideoCapture, float]:
     captura = cv2.VideoCapture(str(ruta))
     if not captura.isOpened():
@@ -111,18 +133,19 @@ def _abrir_video(ruta: Path) -> tuple[cv2.VideoCapture, float]:
         fps = 0.0
     return captura, fps
 
-
 def _iterar_fotogramas(
     fuente: str,
     fps_por_defecto: float,
     max_fotogramas: int | None,
+    rotacion: int | None = None,
 ) -> Iterator[tuple[int, float, np.ndarray]]:
     """Itera ``(indice, t_s, imagen)`` desde un video, un directorio o una cámara.
 
     Las fuentes en vivo usan reloj de pared (``reloj_real``) para que el
     cronómetro T del PARE mida segundos reales; los archivos y directorios usan
     ``indice / fps`` para que la máquina de estados reciba tiempos
-    reproducibles (FR-017).
+    reproducibles (FR-017). Las fuentes en vivo se enderezan con ``_orientar``
+    según ``rotacion`` para que el ROI calibrado aplique tal cual.
     """
     if _es_fuente_viva(fuente):
         # Un índice es un int; una URL se pasa como texto, sin reinterpretarla.
@@ -135,7 +158,10 @@ def _iterar_fotogramas(
         if not np.isfinite(fps) or fps <= 0:
             fps = fps_por_defecto
         try:
-            yield from _iterar_captura(captura, fps, max_fotogramas, reloj_real=True)
+            for indice, t_s, imagen in _iterar_captura(
+                captura, fps, max_fotogramas, reloj_real=True
+            ):
+                yield indice, t_s, _orientar(imagen, rotacion)
         finally:
             captura.release()
         return
@@ -154,7 +180,6 @@ def _iterar_fotogramas(
         yield from _iterar_captura(captura, fps, max_fotogramas)
     finally:
         captura.release()
-
 
 def _iterar_captura(
     captura: cv2.VideoCapture,
@@ -186,7 +211,6 @@ def _iterar_captura(
         yield indice, t_s, imagen
         indice += 1
 
-
 def _iterar_directorio(
     directorio: Path,
     fps: float,
@@ -207,9 +231,7 @@ def _iterar_directorio(
             continue
         yield indice, indice / fps, imagen
 
-
 # -- anotación de referencia (opcional) --------------------------------------
-
 
 class Referencia:
     """Anotación de señales físicas por rango de fotogramas (Q3, FR-025).
@@ -252,7 +274,6 @@ class Referencia:
                 return True, ClaseSenal(str(tramo["clase"]).upper())
         return False, None
 
-
 def _construir_transporte(nombre: str, params: ParametrosConfiguracion) -> Transporte:
     """Crea el transporte pedido por ``--transporte`` (T035).
 
@@ -266,7 +287,6 @@ def _construir_transporte(nombre: str, params: ParametrosConfiguracion) -> Trans
     if nombre == "spp":
         return TransporteSPP(mac=params.mac_bluetooth, timeout_s=params.timeout_transporte_s)
     raise ConfiguracionInvalidaError("transporte", f"transporte desconocido: {nombre}")
-
 
 class _BombeoTransporte:
     """Hilo que drena la cola hacia el transporte, fuera del bucle de visión.
@@ -300,7 +320,6 @@ class _BombeoTransporte:
         while not self._parar.is_set():
             self._cola.drenar(self._transporte)
             self._parar.wait(self._intervalo_s)
-
 
 #: Teclas que mueven el robot en modo manual. Los valores son ``keysym`` de
 #: tkinter en minúsculas: se comparan contra ``evento.keysym.lower()``, de modo
@@ -338,7 +357,6 @@ _DEADMAN_S = 0.5
 #: es la precisión de la parada, solo el margen de retraso con que se detecta: el
 #: disparo real ocurre entre 0.5 s y 0.5 s + esta granularidad.
 _DEADMAN_MUESTREO_S = 0.05
-
 
 class _ControlManual:
     """Conmutador auto/manual y traducción de teclas a comandos de movimiento.
@@ -390,6 +408,9 @@ class _ControlManual:
         self._directorio_capturas = (
             directorio_capturas if directorio_capturas is not None else Path("salidas") / "capturas"
         )
+        # Último comando que el operador mandó. El visor lo usa en MANUAL para
+        # mostrar lo que de verdad se transmite, no lo que el pipeline decidiría.
+        self._comando_actual: ComandoMovimiento | None = None
 
     # -- estado ---------------------------------------------------------
 
@@ -407,6 +428,16 @@ class _ControlManual:
     def modo(self) -> str:
         """Etiqueta del modo activo, tal como se muestra en el título."""
         return _MODO_MANUAL if self._manual.is_set() else _MODO_AUTONOMO
+
+    @property
+    def comando_actual(self) -> ComandoMovimiento | None:
+        """Último comando manual encolado, o ``None`` si aún no hubo ninguno.
+
+        El visor lo consulta en MANUAL para dibujar la orden que el robot está
+        recibiendo de verdad; en AUTÓNOMO queda a ``None`` porque el operador no
+        manda nada.
+        """
+        return self._comando_actual
 
     # -- acciones -------------------------------------------------------
 
@@ -527,6 +558,7 @@ class _ControlManual:
 
     def enviar(self, comando: ComandoMovimiento) -> bool:
         """Encola un comando manual. Sin cola (pruebas) es una no-op."""
+        self._comando_actual = comando
         if self._cola is None:
             return False
         return self._cola.encolar(comando)
@@ -571,6 +603,21 @@ class _ControlManual:
         self._ultima_orden = time.monotonic()
         self.enviar(comando)
         return comando.name
+
+#: Alto máximo del visor en píxeles. La imagen vertical (720x1280 tras rotar) no
+#: cabe en una pantalla de 1080p junto a la barra de título, así que se reduce
+#: SOLO para mostrarla: el pipeline y la captura usan la resolución completa.
+_ALTO_MAX_VENTANA = 900
+
+
+def _encajar_en_ventana(imagen: np.ndarray) -> np.ndarray:
+    """Reduce la imagen para que quepa en pantalla. No toca la original."""
+    alto = imagen.shape[0]
+    if alto <= _ALTO_MAX_VENTANA:
+        return imagen
+    escala = _ALTO_MAX_VENTANA / alto
+    ancho = max(1, int(imagen.shape[1] * escala))
+    return cv2.resize(imagen, (ancho, _ALTO_MAX_VENTANA), interpolation=cv2.INTER_AREA)
 
 
 class _VentanaTkinter:
@@ -621,19 +668,19 @@ class _VentanaTkinter:
         self._raiz.title(self._titulo())
 
     def dibujar(self, fotograma: np.ndarray) -> None:
-        exito, png = cv2.imencode(".png", fotograma)
+        # Se registra a resolución completa: la captura con `c` debe guardar la
+        # imagen real, no la reducida para la pantalla.
+        self._control.registrar_fotograma(fotograma)
+        visible = _encajar_en_ventana(fotograma)
+        exito, png = cv2.imencode(".png", visible)
         if not exito:
             return
-        # Antes de pintarlo, para que la tecla de captura guarde justo lo que el
-        # operador tiene delante de los ojos.
-        self._control.registrar_fotograma(fotograma)
         self._imagen = self._tk.PhotoImage(master=self._raiz, data=png.tobytes())
         self._etiqueta.configure(image=self._imagen)
         self._raiz.update()
 
     def cerrar(self) -> None:
         self._raiz.destroy()
-
 
 class _VentanaEnVivo:
     """Muestra el último fotograma anotado en una ventana, en su propio hilo.
@@ -729,9 +776,7 @@ class _VentanaEnVivo:
                 except Exception:
                     pass
 
-
 # -- corrida ---------------------------------------------------------------
-
 
 def _resolver_salida(salida: str | None) -> tuple[Path, str]:
     """Devuelve ``(directorio, corrida_id)``; sin ``--salida`` usa marca de tiempo."""
@@ -740,7 +785,6 @@ def _resolver_salida(salida: str | None) -> tuple[Path, str]:
         return directorio, directorio.name or "corrida"
     corrida_id = "corrida_" + datetime.now().strftime("%Y%m%d_%H%M%S")
     return Path("salidas") / corrida_id, corrida_id
-
 
 def _resumen_consola(resumen: dict) -> str:
     lineas = [
@@ -772,7 +816,6 @@ def _resumen_consola(resumen: dict) -> str:
     )
     return "\n".join(lineas)
 
-
 def _resumen_control_consola(resumen: dict) -> str:
     """Resumen del control de trayectoria para la consola (T032/T035)."""
     por_comando = resumen["fotogramas_por_comando"]
@@ -792,7 +835,6 @@ def _resumen_control_consola(resumen: dict) -> str:
         ]
     )
 
-
 def _correr(
     params: ParametrosConfiguracion,
     fuente: str,
@@ -805,6 +847,7 @@ def _correr(
     transporte: Transporte,
     metricas_control: MetricasControl,
     mostrar: bool = False,
+    rotacion: int | None = None,
 ) -> MetricasCorrida:
     """Recorre la fuente componiendo pipeline, FSM, control, métricas, transporte
     y —si ``mostrar``— una ventana en vivo con el fotograma anotado."""
@@ -828,7 +871,9 @@ def _correr(
     inicio_parada: float | None = None
 
     try:
-        for indice, t_s, imagen in _iterar_fotogramas(fuente, params.fps_objetivo, max_fotogramas):
+        for indice, t_s, imagen in _iterar_fotogramas(
+            fuente, params.fps_objetivo, max_fotogramas, rotacion
+        ):
             t_inicio_fotograma = time.perf_counter()
             resultado = pipeline.procesar(indice, t_s, imagen)
 
@@ -889,7 +934,22 @@ def _correr(
                 inicio_parada = None
 
             if frames is not None or vista is not None:
-                anotada = anotar(imagen, resultado, estado, params, decision)
+                manual = vista is not None and vista.manual_activo
+                # En MANUAL el visor debe mostrar lo que el operador está
+                # mandando, no lo que el pipeline habría mandado: si no, la
+                # ventana mentiría justo cuando el operador cree tener el control.
+                comando_mostrado = (
+                    vista.control.comando_actual if manual else decision.comando
+                )
+                anotada = anotar(
+                    imagen,
+                    resultado,
+                    estado,
+                    params,
+                    decision,
+                    comando_mostrado=comando_mostrado,
+                    modo=_MODO_MANUAL if manual else _MODO_AUTONOMO,
+                )
                 if frames is not None:
                     cv2.imwrite(str(frames / f"frame_{indice:06d}.png"), anotada)
                 if vista is not None:
@@ -921,7 +981,6 @@ def _correr(
                 print(f"[aviso] ventana en vivo: {vista.error}", file=sys.stderr)
 
     return metricas
-
 
 def _parsear_args(argv: Sequence[str] | None) -> argparse.Namespace:
     analizador = argparse.ArgumentParser(
@@ -979,8 +1038,18 @@ def _parsear_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default="simulado",
         help="transporte hacia el robot: 'simulado' (por defecto, sin hardware) o 'spp' (RFCOMM real)",
     )
+    analizador.add_argument(
+        "--rotar",
+        choices=tuple(_ROTACIONES),
+        default=_ROTACION_POR_DEFECTO,
+        help=(
+            "orientación de la cámara EN VIVO: 'horario' (por defecto), "
+            "'antihorario', '180' o 'ninguna'. Sirve para el celular montado "
+            "vertical cuando DroidCam entrega la imagen horizontal. No afecta a "
+            "videos ni a directorios."
+        ),
+    )
     return analizador.parse_args(argv)
-
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Punto de entrada del CLI; devuelve el código de salida del contrato."""
@@ -1024,6 +1093,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             transporte=transporte,
             metricas_control=metricas_control,
             mostrar=args.mostrar,
+            rotacion=_ROTACIONES[args.rotar],
         )
     except FuenteInvalidaError as error:
         print(f"[error] fuente invalida: {error}", file=sys.stderr)
@@ -1052,7 +1122,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"metricas  : {ruta_metricas}")
     print(f"control   : {ruta_control}")
     return CODIGO_OK
-
 
 if __name__ == "__main__":
     sys.exit(main())

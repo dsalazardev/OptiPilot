@@ -137,7 +137,7 @@ def test_pare_persistente_no_reinicia_t_ni_duplica_detencion(parametros_por_defe
         maquina,
         estado=EstadoRobot.EN_MARCHA,
         veredicto=PermisoMovimiento.AUTORIZADO,
-        causa="T_CUMPLIDO_CON_SIGA",
+        causa="T_CUMPLIDO",
         transiciones=[
             (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
         ],
@@ -158,7 +158,7 @@ def test_siga_tras_cumplir_t_reanuda_y_registra_transicion(parametros_por_defect
         maquina,
         estado=EstadoRobot.EN_MARCHA,
         veredicto=PermisoMovimiento.AUTORIZADO,
-        causa="T_CUMPLIDO_CON_SIGA",
+        causa="T_CUMPLIDO",
         transiciones=[
             (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
         ],
@@ -166,16 +166,18 @@ def test_siga_tras_cumplir_t_reanuda_y_registra_transicion(parametros_por_defect
     assert resultado.transiciones_nuevas[0].t_s == 3.0
 
 
-def test_siga_confirmado_antes_de_t_queda_armado(parametros_por_defecto) -> None:
-    """Escenario 4: SIGA antes de T reanuda al cumplirse T aunque salga de vista."""
+def test_siga_confirmado_antes_de_t_no_adelanta_la_reanudacion(
+    parametros_por_defecto,
+) -> None:
+    """Escenario 4: un SIGA antes de T no acorta la parada; T sigue mandando."""
     maquina = _maquina(parametros_por_defecto)
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
 
-    armado = maquina.actualizar(
+    temprano = maquina.actualizar(
         frozenset({ClaseSenal.SIGA}), [_siga(idx=1, t_s=1.0)], t_s=1.0
     )
     _completo(
-        armado,
+        temprano,
         maquina,
         estado=EstadoRobot.DETENIDO_MINIMO,
         veredicto=PermisoMovimiento.NO_AUTORIZADO,
@@ -189,7 +191,7 @@ def test_siga_confirmado_antes_de_t_queda_armado(parametros_por_defecto) -> None
         maquina,
         estado=EstadoRobot.EN_MARCHA,
         veredicto=PermisoMovimiento.AUTORIZADO,
-        causa="T_CUMPLIDO_CON_SIGA",
+        causa="T_CUMPLIDO",
         transiciones=[
             (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
         ],
@@ -215,8 +217,13 @@ def test_siga_en_marcha_no_detiene(parametros_por_defecto) -> None:
     assert resultado.decision.autorizada
 
 
-def test_t_cumplido_sin_siga_permanece_esperando(parametros_por_defecto) -> None:
-    """Escenario 6: T por sí solo no reanuda; queda a la espera de SIGA (FR-017)."""
+def test_t_cumplido_sin_siga_reanuda_igual(parametros_por_defecto) -> None:
+    """Escenario 6: al cumplirse T el robot reanuda aunque nunca haya visto SIGA.
+
+    Decisión del equipo (2026-10-05): la parada dura exactamente ``t_parada_s`` y
+    después el robot vuelve a seguir la línea. La SIGA ya no condiciona la
+    reanudación; se sigue detectando y contando para la rúbrica.
+    """
     maquina = _maquina(parametros_por_defecto)
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
 
@@ -225,28 +232,19 @@ def test_t_cumplido_sin_siga_permanece_esperando(parametros_por_defecto) -> None
     _completo(
         resultado,
         maquina,
-        estado=EstadoRobot.DETENIDO_ESPERANDO_SIGA,
-        veredicto=PermisoMovimiento.NO_AUTORIZADO,
-        causa="T_CUMPLIDO_SIN_SIGA",
+        estado=EstadoRobot.EN_MARCHA,
+        veredicto=PermisoMovimiento.AUTORIZADO,
+        causa="T_CUMPLIDO",
         transiciones=[
-            (
-                EstadoRobot.DETENIDO_MINIMO,
-                EstadoRobot.DETENIDO_ESPERANDO_SIGA,
-                CausaTransicion.T_CUMPLIDO,
-            )
+            (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
         ],
     )
-    assert not resultado.decision.autorizada
+    assert resultado.decision.autorizada
 
+    # Un PARE meramente presente (sin confirmación nueva) no vuelve a detener.
     posterior = maquina.actualizar(frozenset({ClaseSenal.PARE}), [], t_s=9.0)
-    _completo(
-        posterior,
-        maquina,
-        estado=EstadoRobot.DETENIDO_ESPERANDO_SIGA,
-        veredicto=PermisoMovimiento.NO_AUTORIZADO,
-        causa="ESPERANDO_SIGA",
-        transiciones=[],
-    )
+    assert posterior.estado is EstadoRobot.EN_MARCHA
+    assert posterior.decision.autorizada
 
 
 def test_perdida_momentanea_no_altera_estado_ni_cronometro(parametros_por_defecto) -> None:
@@ -272,15 +270,17 @@ def test_perdida_momentanea_no_altera_estado_ni_cronometro(parametros_por_defect
         maquina,
         estado=EstadoRobot.EN_MARCHA,
         veredicto=PermisoMovimiento.AUTORIZADO,
-        causa="T_CUMPLIDO_CON_SIGA",
+        causa="T_CUMPLIDO",
         transiciones=[
             (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
         ],
     )
 
 
-def test_pare_y_siga_co_visibles_arman_siga_sin_exigir_otro(parametros_por_defecto) -> None:
-    """Escenario 8: PARE y SIGA co-visibles ⇒ el SIGA queda armado (Q-A, FR-020)."""
+def test_pare_y_siga_co_visibles_detienen_y_reanudan_al_cumplir_t(
+    parametros_por_defecto,
+) -> None:
+    """Escenario 8: PARE y SIGA co-visibles ⇒ detiene, y T reanuda (Q-A, FR-020)."""
     maquina = _maquina(parametros_por_defecto)
 
     detenido = maquina.actualizar(
@@ -309,17 +309,17 @@ def test_pare_y_siga_co_visibles_arman_siga_sin_exigir_otro(parametros_por_defec
         maquina,
         estado=EstadoRobot.EN_MARCHA,
         veredicto=PermisoMovimiento.AUTORIZADO,
-        causa="T_CUMPLIDO_CON_SIGA",
+        causa="T_CUMPLIDO",
         transiciones=[
             (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
         ],
     )
 
 
-def test_pare_nuevo_durante_detencion_no_altera_t_ni_siga_armado(
+def test_pare_nuevo_durante_detencion_no_reinicia_t(
     parametros_por_defecto,
 ) -> None:
-    """Escenario 9: PARE nuevo con T en curso y SIGA armado no invalida nada."""
+    """Escenario 9: un PARE nuevo con T en curso no reinicia el cronómetro."""
     maquina = _maquina(parametros_por_defecto)
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
     maquina.actualizar(frozenset({ClaseSenal.SIGA}), [_siga(idx=1, t_s=1.0)], t_s=1.0)
@@ -342,7 +342,7 @@ def test_pare_nuevo_durante_detencion_no_altera_t_ni_siga_armado(
         maquina,
         estado=EstadoRobot.EN_MARCHA,
         veredicto=PermisoMovimiento.AUTORIZADO,
-        causa="T_CUMPLIDO_CON_SIGA",
+        causa="T_CUMPLIDO",
         transiciones=[
             (EstadoRobot.DETENIDO_MINIMO, EstadoRobot.EN_MARCHA, CausaTransicion.T_CUMPLIDO)
         ],
@@ -362,7 +362,7 @@ def test_fsm_no_emite_rearme_ese_latch_es_de_la_deteccion(parametros_por_defecto
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
 
     # Pasos cortos: el ciclo completo no debe cruzar el cronómetro T (3.0 s), que
-    # provocaría la transición legítima DETENIDO_MINIMO -> DETENIDO_ESPERANDO_SIGA.
+    # provocaría la transición legítima DETENIDO_MINIMO -> EN_MARCHA.
     for paso in range(parametros_por_defecto.x_rearme + 5):
         resultado = maquina.actualizar(frozenset(), [], t_s=0.1 * (paso + 1))
         assert not hasattr(resultado, "eventos_nuevos")
@@ -389,7 +389,7 @@ def test_pare_rearmado_por_deteccion_no_altera_la_fsm(parametros_por_defecto) ->
 
 
 def test_invariante_detenido_implica_no_autorizado(parametros_por_defecto) -> None:
-    """DETENIDO_MINIMO y DETENIDO_ESPERANDO_SIGA nunca autorizan movimiento."""
+    """Mientras el robot está detenido por T nunca autoriza movimiento."""
     maquina = _maquina(parametros_por_defecto)
     maquina.actualizar(frozenset({ClaseSenal.PARE}), [_pare(0, 0.0)], t_s=0.0)
 

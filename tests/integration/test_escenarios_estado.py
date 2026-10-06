@@ -7,19 +7,18 @@ y no con eventos inyectados a mano (que es lo que hace
 
 Los escenarios son los que describen la realidad del laboratorio:
 
-1. **Co-visible**: PARE y SIGA visibles a la vez. El PARE detiene y el SIGA queda
-   armado en el mismo fotograma.
-2. **SIGA antes de T**: el SIGA se confirma durante la parada mínima. Queda
-   armado y el robot reanuda al cumplirse T, no antes (FR-017, FR-022).
+1. **Co-visible**: PARE y SIGA visibles a la vez. El PARE detiene; al cumplirse T
+   el robot reanuda.
+2. **SIGA antes de T**: el SIGA se confirma durante la parada pero no la acorta;
+   el robot reanuda al cumplirse T, no antes (FR-017, FR-022).
 3. **PARE nuevo durante la detención**: una segunda señal roja no reinicia el
-   cronómetro T ni invalida un SIGA ya armado (spec §Clarifications Q sobre
-   PARE nuevo).
+   cronómetro T (spec §Clarifications Q sobre PARE nuevo).
 4. **Pérdida ≤ K**: un hueco de hasta K fotogramas no interrumpe la confirmación
    ni reinicia el cronómetro (FR-011, SC-005).
 
 En los cuatro se comprueba el invariante que define el reto: mientras el robot
 esté DETENIDO no puede autorizarse a sí mismo, y la única vía de regreso a
-EN_MARCHA es un SIGA confirmado.
+EN_MARCHA es que se cumpla el cronómetro T.
 """
 
 from __future__ import annotations
@@ -80,7 +79,7 @@ def perdida_dentro_de_k(parametros_por_defecto: ParametrosConfiguracion) -> Traz
 
 
 def _invariante_sin_autorizacion_espuria(traza: TrazaEscenario) -> None:
-    """Ningún fotograma detenido puede autorizar movimiento, y sólo un SIGA reanuda."""
+    """Ningún fotograma detenido puede autorizar movimiento; solo T reanuda."""
     for indice, estado in enumerate(traza.estados):
         if estado is not EstadoRobot.EN_MARCHA:
             assert traza.veredictos[indice] is PermisoMovimiento.NO_AUTORIZADO, (
@@ -93,7 +92,7 @@ def _invariante_sin_autorizacion_espuria(traza: TrazaEscenario) -> None:
         and traza.estados[indice - 1] is not EstadoRobot.EN_MARCHA
     ]
     for indice in reanuda:
-        assert traza.causas[indice] in {"SIGA_CONFIRMADO", "T_CUMPLIDO_CON_SIGA"}, (
+        assert traza.causas[indice] == "T_CUMPLIDO", (
             f"reanudación en el fotograma {indice} por causa inesperada "
             f"{traza.causas[indice]!r}"
         )
@@ -121,19 +120,18 @@ def test_co_visible_el_pare_detiene_aunque_haya_siga(co_visible: TrazaEscenario)
     assert cambios == [
         (0, "EN_MARCHA", "INICIO"),
         (12, "DETENIDO_MINIMO", "PARE_DETENIDO"),
-        (F_T_CUMPLIDO, "EN_MARCHA", "T_CUMPLIDO_CON_SIGA"),
+        (F_T_CUMPLIDO, "EN_MARCHA", "T_CUMPLIDO"),
     ]
     assert co_visible.veredictos[12] is PermisoMovimiento.NO_AUTORIZADO
     _invariante_sin_autorizacion_espuria(co_visible)
 
 
-def test_co_visible_el_siga_ya_armado_hace_reanudar_al_cumplir_t(
+def test_co_visible_reanuda_al_cumplir_t(
     co_visible: TrazaEscenario,
 ) -> None:
-    """Con el SIGA armado desde el inicio, reanuda en cuanto T se cumple."""
-    assert co_visible.causas[F_T_CUMPLIDO] == "T_CUMPLIDO_CON_SIGA"
-    # No pasa por DETENIDO_ESPERANDO_SIGA: había SIGA armado.
-    assert EstadoRobot.DETENIDO_ESPERANDO_SIGA not in co_visible.estados
+    """Con PARE y SIGA a la vista, el robot reanuda en cuanto T se cumple."""
+    assert co_visible.causas[F_T_CUMPLIDO] == "T_CUMPLIDO"
+    assert co_visible.estados[F_T_CUMPLIDO] is EstadoRobot.EN_MARCHA
 
 
 # --------------------------------------------------------------------------
@@ -141,10 +139,10 @@ def test_co_visible_el_siga_ya_armado_hace_reanudar_al_cumplir_t(
 # --------------------------------------------------------------------------
 
 
-def test_siga_antes_de_t_queda_armado_sin_interrumpir_la_parada(
+def test_siga_antes_de_t_no_interrumpe_la_parada(
     siga_antes_de_t: TrazaEscenario,
 ) -> None:
-    """El SIGA de f42 no reanuda al instante: T sigue siendo parada mínima."""
+    """El SIGA de f42 no reanuda al instante: T es la parada exigida."""
     assert siga_antes_de_t.fotogramas_de("PARE_CONFIRMADO") == [12]
     assert siga_antes_de_t.fotogramas_de("SIGA_CONFIRMADO") == [42]
 
@@ -156,8 +154,8 @@ def test_siga_antes_de_t_queda_armado_sin_interrumpir_la_parada(
 def test_siga_antes_de_t_reanuda_exactamente_al_cumplir_t(
     siga_antes_de_t: TrazaEscenario,
 ) -> None:
-    """Al cumplirse T con el SIGA armado, el robot reanuda (SC-009)."""
-    assert siga_antes_de_t.causas[F_T_CUMPLIDO] == "T_CUMPLIDO_CON_SIGA"
+    """Al cumplirse T el robot reanuda (SC-009)."""
+    assert siga_antes_de_t.causas[F_T_CUMPLIDO] == "T_CUMPLIDO"
     assert siga_antes_de_t.estados[F_T_CUMPLIDO] is EstadoRobot.EN_MARCHA
     _invariante_sin_autorizacion_espuria(siga_antes_de_t)
 
@@ -177,7 +175,7 @@ def test_pare_nuevo_no_reinicia_el_cronometro_t(
     """
     assert pare_nuevo_durante_parada.fotogramas_de("PARE_CONFIRMADO") == [12, 52]
     # T se cumple 3,0 s después del PRIMER PARE (f12 → t 0,4 s), no del segundo.
-    assert pare_nuevo_durante_parada.causas[F_T_CUMPLIDO] == "T_CUMPLIDO_SIN_SIGA"
+    assert pare_nuevo_durante_parada.causas[F_T_CUMPLIDO] == "T_CUMPLIDO"
     transiciones_al_cumplir_t = [
         tr for tr in pare_nuevo_durante_parada.transiciones if tr[0] == F_T_CUMPLIDO
     ]
@@ -185,16 +183,16 @@ def test_pare_nuevo_no_reinicia_el_cronometro_t(
         (
             F_T_CUMPLIDO,
             "DETENIDO_MINIMO",
-            "DETENIDO_ESPERANDO_SIGA",
+            "EN_MARCHA",
             "T_CUMPLIDO",
         )
     ]
 
 
-def test_pare_nuevo_no_invalida_un_siga_ya_armado(
+def test_pare_nuevo_no_adelanta_la_reanudacion(
     parametros_por_defecto: ParametrosConfiguracion,
 ) -> None:
-    """PARE nuevo después de un SIGA armado no destruye el armado (spec Q-PARE-nuevo)."""
+    """Un PARE nuevo durante la parada no acorta ni alarga el cronómetro."""
     guion = tramos_a_clases(
         TOTAL, [(10, 26, "PARE"), (40, 60, "SIGA"), (70, 90, "PARE")]
     )
@@ -202,24 +200,21 @@ def test_pare_nuevo_no_invalida_un_siga_ya_armado(
 
     assert traza.fotogramas_de("PARE_CONFIRMADO") == [12, 72]
     assert traza.fotogramas_de("SIGA_CONFIRMADO") == [42]
-    # El SIGA armado a f42 sigue vigente: reanuda al cumplirse T, no después.
-    assert traza.causas[F_T_CUMPLIDO] == "T_CUMPLIDO_CON_SIGA"
+    # El PARE de f72 no reinicia T: la reanudación sigue siendo a los 3 s del f12.
+    assert traza.causas[F_T_CUMPLIDO] == "T_CUMPLIDO"
     _invariante_sin_autorizacion_espuria(traza)
 
 
-def test_pare_nuevo_tras_cumplir_t_deja_esperando_siga(
+def test_pare_nuevo_tras_cumplir_t_no_vuelve_a_detener(
     pare_nuevo_durante_parada: TrazaEscenario,
 ) -> None:
-    """Sin SIGA, el robot queda esperando indefinidamente aunque llegue otro PARE."""
+    """Tras reanudar por T, un PARE meramente presente no vuelve a detener."""
     cambios = pare_nuevo_durante_parada.cambios_de_estado()
     assert cambios == [
         (0, "EN_MARCHA", "INICIO"),
         (12, "DETENIDO_MINIMO", "PARE_DETENIDO"),
-        (F_T_CUMPLIDO, "DETENIDO_ESPERANDO_SIGA", "T_CUMPLIDO_SIN_SIGA"),
-        (152, "EN_MARCHA", "SIGA_CONFIRMADO"),
+        (F_T_CUMPLIDO, "EN_MARCHA", "T_CUMPLIDO"),
     ]
-    # Ningún SIGA antes de f152: el robot no se movió solo.
-    assert pare_nuevo_durante_parada.fotogramas_de("SIGA_CONFIRMADO") == [152]
 
 
 # --------------------------------------------------------------------------
@@ -251,7 +246,7 @@ def test_perdida_dentro_de_k_no_reinicia_el_cronometro(
     assert cambios == [
         (0, "EN_MARCHA", "INICIO"),
         (12, "DETENIDO_MINIMO", "PARE_DETENIDO"),
-        (F_T_CUMPLIDO, "DETENIDO_ESPERANDO_SIGA", "T_CUMPLIDO_SIN_SIGA"),
+        (F_T_CUMPLIDO, "EN_MARCHA", "T_CUMPLIDO"),
     ]
     _invariante_sin_autorizacion_espuria(perdida_dentro_de_k)
 
@@ -273,7 +268,7 @@ def test_perdida_mayor_que_k_si_interrumpe_la_confirmacion(
     assert perdidas, "un hueco mayor que K debe producir SENAL_PERDIDA"
     assert traza.tipos_de_evento().count("PARE_REARMADO") >= 1
     # La reaparición genera una nueva ocurrencia ⇒ T tampoco se reinicia.
-    assert traza.causas[F_T_CUMPLIDO] == "T_CUMPLIDO_SIN_SIGA"
+    assert traza.causas[F_T_CUMPLIDO] == "T_CUMPLIDO"
 
 
 # --------------------------------------------------------------------------

@@ -163,9 +163,17 @@ def test_control_tiene_los_diez_parametros_con_su_default(campo: str, esperado: 
 
 
 def test_los_diez_parametros_de_control_estan_en_config_vision_json() -> None:
-    """El JSON versionado y los defaults del código deben coincidir (T006)."""
+    """El JSON versionado y los defaults del código deben coincidir (T006).
+
+    La MAC de Bluetooth queda fuera de la comparación: es un valor por robot que
+    el equipo edita para cada mBot (``config/vision.json``), no un default que
+    deba coincidir con el código. Su formato sí se valida (regla V5 de
+    ``configuracion.py``).
+    """
     parametros = cargar_parametros("config/vision.json")
     for campo, esperado in PARAMETROS_CONTROL:
+        if campo == "mac_bluetooth":
+            continue
         assert getattr(parametros, campo) == esperado, campo
 
 

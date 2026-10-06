@@ -45,6 +45,8 @@ GUION_LARGO = [(10, 26, "PARE"), (106, 122, "SIGA")]
 TOTAL_LARGO = 131
 F_PARE_CONFIRMADO = 12
 F_SIGA_CONFIRMADO = 108
+#: El cronómetro T=3,0 s se cumple 90 fotogramas después del PARE confirmado.
+F_T_CUMPLIDO = 102
 
 
 # --------------------------------------------------------------------------
@@ -190,23 +192,22 @@ def test_eventos_jsonl_incluye_las_transiciones_de_estado(
     recorrido = [(t["origen"], t["destino"], t["causa"]) for t in transiciones]
     assert recorrido == [
         ("EN_MARCHA", "DETENIDO_MINIMO", "PARE_CONFIRMADO"),
-        ("DETENIDO_MINIMO", "DETENIDO_ESPERANDO_SIGA", "T_CUMPLIDO"),
-        ("DETENIDO_ESPERANDO_SIGA", "EN_MARCHA", "SIGA_CONFIRMADO"),
+        ("DETENIDO_MINIMO", "EN_MARCHA", "T_CUMPLIDO"),
     ]
 
 
 def test_la_corrida_larga_cierra_una_parada_con_retardo(
     fuente_larga: Path, salida: Path
 ) -> None:
-    """Con T=3,0 s el robot reanuda en el SIGA y el retardo queda registrado."""
+    """Con T=3,0 s el robot reanuda al cumplirse T y el retardo queda registrado."""
     _, metricas, _ = correr(fuente_larga, salida)
     assert len(metricas["paradas"]) == 1
     parada = metricas["paradas"][0]
     assert parada["t_configurado_s"] == pytest.approx(3.0)
     assert parada["inicio_t"] == pytest.approx(F_PARE_CONFIRMADO / 30.0, abs=1e-6)
-    assert parada["fin_t"] == pytest.approx(F_SIGA_CONFIRMADO / 30.0, abs=1e-6)
-    # El SIGA llegó 0,2 s después de que se cumpliera T: ese es el retardo.
-    assert parada["retardo_s"] == pytest.approx(0.2, abs=1e-6)
+    # La parada cierra al cumplirse T, no al llegar el SIGA.
+    assert parada["fin_t"] == pytest.approx(F_T_CUMPLIDO / 30.0, abs=1e-6)
+    assert parada["retardo_s"] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_latencia_de_decision_se_registra_en_fotogramas(

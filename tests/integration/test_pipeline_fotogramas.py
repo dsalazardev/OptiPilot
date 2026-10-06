@@ -207,44 +207,42 @@ def test_no_hay_confusiones_entre_clases(corrida: _Corrida) -> None:
 
 
 def test_secuencia_de_estados_de_la_parada(corrida: _Corrida) -> None:
-    """EN_MARCHA -> DETENIDO_MINIMO -> DETENIDO_ESPERANDO_SIGA -> EN_MARCHA."""
+    """EN_MARCHA -> DETENIDO_MINIMO -> EN_MARCHA (reanuda al cumplir T)."""
     cambios = [estado for i, estado in enumerate(corrida.estados) if i == 0 or estado is not corrida.estados[i - 1]]
     assert cambios == [
         EstadoRobot.EN_MARCHA,
         EstadoRobot.DETENIDO_MINIMO,
-        EstadoRobot.DETENIDO_ESPERANDO_SIGA,
         EstadoRobot.EN_MARCHA,
     ]
 
 
-def test_t_no_reanuda_por_si_solo(corrida: _Corrida) -> None:
-    """Cumplido T sin SIGA armado, el robot queda detenido (FR-017).
+def test_t_reanuda_por_si_solo(corrida: _Corrida) -> None:
+    """Al cumplirse T el robot reanuda; la SIGA posterior no hace falta (FR-017).
 
-    Es el invariante central del reto: el robot no se va solo. Si el equipo no
-    coloca la señal verde, el robot permanece detenido indefinidamente.
+    Decisión del equipo (2026-10-05): la parada dura exactamente ``t_parada_s`` y
+    el robot vuelve a seguir la línea, aunque no hubiera visto SIGA.
     """
-    causa_en_t = corrida.causas[F_T_CUMPLIDO]
-    assert causa_en_t == "T_CUMPLIDO_SIN_SIGA"
-    assert corrida.veredictos[F_T_CUMPLIDO] is PermisoMovimiento.NO_AUTORIZADO
+    assert corrida.causas[F_T_CUMPLIDO] == "T_CUMPLIDO"
+    assert corrida.veredictos[F_T_CUMPLIDO] is PermisoMovimiento.AUTORIZADO
 
-    # Tras cumplirse T y antes del SIGA, todos los fotogramas son NO AUTORIZADO.
-    for indice in range(F_T_CUMPLIDO, F_SIGA_CONFIRMADO):
+    # Mientras el cronómetro corre, todos los fotogramas son NO AUTORIZADO.
+    for indice in range(F_PARE_CONFIRMADO, F_T_CUMPLIDO):
         assert corrida.veredictos[indice] is PermisoMovimiento.NO_AUTORIZADO, (
-            f"el robot se autorizó solo en el fotograma {indice}"
+            f"el robot se autorizó dentro de la parada en el fotograma {indice}"
         )
 
 
-def test_siga_confirmado_es_el_unico_reanudador(corrida: _Corrida) -> None:
-    """El paso a EN_MARCHA ocurre exactamente en la confirmación del SIGA."""
+def test_el_cronometro_es_el_unico_reanudador(corrida: _Corrida) -> None:
+    """La única reanudación ocurre exactamente al cumplirse T."""
     reanudaciones = [
         i
         for i in range(1, len(corrida.estados))
         if corrida.estados[i] is EstadoRobot.EN_MARCHA
         and corrida.estados[i - 1] is not EstadoRobot.EN_MARCHA
     ]
-    assert reanudaciones == [F_SIGA_CONFIRMADO]
-    assert corrida.causas[F_SIGA_CONFIRMADO] == "SIGA_CONFIRMADO"
-    assert corrida.veredictos[F_SIGA_CONFIRMADO] is PermisoMovimiento.AUTORIZADO
+    assert reanudaciones == [F_T_CUMPLIDO]
+    assert corrida.causas[F_T_CUMPLIDO] == "T_CUMPLIDO"
+    assert corrida.veredictos[F_T_CUMPLIDO] is PermisoMovimiento.AUTORIZADO
 
 
 def test_invariante_detenido_implica_no_autorizado(corrida: _Corrida) -> None:
@@ -268,22 +266,22 @@ def test_resumen_cuenta_una_ocurrencia_por_senal(corrida: _Corrida) -> None:
 
 
 def test_resumen_registra_la_parada_con_su_retardo(corrida: _Corrida) -> None:
-    """La parada se registra con T configurado y retardo tras cumplir T (SC-008)."""
+    """La parada se registra con T configurado; sin retardo, la parada es T exacto."""
     paradas = corrida.metricas.resumen()["paradas"]
     assert len(paradas) == 1
     parada = paradas[0]
 
     inicio = F_PARE_CONFIRMADO / FPS
-    fin = F_SIGA_CONFIRMADO / FPS
+    fin = F_T_CUMPLIDO / FPS
     assert parada["inicio_t"] == pytest.approx(inicio, abs=1e-6)
     assert parada["fin_t"] == pytest.approx(fin, abs=1e-6)
     assert parada["t_configurado_s"] == pytest.approx(3.0)
 
-    # SC-008: la detención dura al menos T, y el retardo es lo que se esperó al SIGA.
+    # SC-008: el cronómetro cierra la parada, así que dura T exacto y el retardo
+    # es 0: ya no se espera a la SIGA para reanudar.
     duracion = parada["fin_t"] - parada["inicio_t"]
-    assert duracion >= parada["t_configurado_s"] - 0.3
-    assert parada["retardo_s"] == pytest.approx(duracion - parada["t_configurado_s"], abs=1e-6)
-    assert parada["retardo_s"] > 0.0
+    assert duracion == pytest.approx(parada["t_configurado_s"], abs=1e-6)
+    assert parada["retardo_s"] == pytest.approx(0.0, abs=1e-6)
 
 
 def test_latencia_de_decision_dentro_del_presupuesto(corrida: _Corrida) -> None:

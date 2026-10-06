@@ -1,12 +1,18 @@
 """Máquina de estados determinista PARE/SIGA (US2, Reto 1).
 
-Implementa el cronómetro de parada mínima T (``t_parada_s``), el armado del
-SIGA, el latcheo/rearme del PARE y la tolerancia a pérdidas momentáneas K
-(``k_tolerancia``) según la tabla de transiciones y las clarificaciones de
-``data-model.md`` (FR-015, FR-016, FR-017, FR-018, FR-019, FR-020, FR-021,
-FR-022, FR-023, FR-024 y FR-025). Es determinista: ``actualizar`` depende solo
-de (``presentes``, ``eventos``, ``t_s``); la misma secuencia produce siempre el
-mismo ``ResultadoEstado`` (Constitución §IV, principio de determinismo total).
+Implementa el cronómetro de parada T (``t_parada_s``), el latcheo/rearme del
+PARE y la tolerancia a pérdidas momentáneas K (``k_tolerancia``) según la tabla
+de transiciones y las clarificaciones de ``data-model.md`` (FR-015, FR-016,
+FR-017, FR-018, FR-019, FR-020, FR-021, FR-022, FR-023, FR-024 y FR-025). Es
+determinista: ``actualizar`` depende solo de (``presentes``, ``eventos``,
+``t_s``); la misma secuencia produce siempre el mismo ``ResultadoEstado``
+(Constitución §IV, principio de determinismo total).
+
+**Parada con reanudación autónoma.** Al ver PARE el robot se detiene; al cumplirse
+``t_parada_s`` reanuda la marcha por sí solo y vuelve a seguir la línea, sin
+necesidad de haber visto SIGA. La SIGA se sigue detectando, contando y
+registrando (criterio 4 de la rúbrica, ``ocurrencias_siga``), pero ya no es la
+condición para reanudar: el cronómetro es la única condición.
 
 Técnicas usadas (todas clásicas y permitidas, sin DL): solo lógica de estados
 y cronómetro sobre las confirmaciones ya emitidas por la etapa de detección
@@ -40,10 +46,7 @@ __all__ = ["MaquinaEstados", "ResultadoEstado"]
 CAUSA_INICIO = "INICIO"
 CAUSA_PARE_DETENIDO = "PARE_DETENIDO"
 CAUSA_T_MINIMO_EN_CURSO = "T_MINIMO_EN_CURSO"
-CAUSA_T_CUMPLIDO_SIN_SIGA = "T_CUMPLIDO_SIN_SIGA"
-CAUSA_ESPERANDO_SIGA = "ESPERANDO_SIGA"
-CAUSA_T_CUMPLIDO_CON_SIGA = "T_CUMPLIDO_CON_SIGA"
-CAUSA_SIGA_EN_MARCHA = "SIGA_EN_MARCHA"
+CAUSA_T_CUMPLIDO = "T_CUMPLIDO"
 
 
 def _no_autorizado(causa: str) -> DecisionMovimiento:
@@ -78,19 +81,16 @@ class ResultadoEstado:
 class MaquinaEstados:
     """Máquina de estados finita (FSM) determinista para la detención/reanudación.
 
-    Estados (``EstadoRobot``): ``EN_MARCHA``, ``DETENIDO_MINIMO`` y
-    ``DETENIDO_ESPERANDO_SIGA`` (FR-015/FR-017). El cronómetro T es el mínimo
-    de detención (``t_parada_s``): no reanuda por sí solo (FR-017) y exige un
-    SIGA confirmado (armado) para cerrar la parada (FR-016/FR-017).
+    Estados (``EstadoRobot``): ``EN_MARCHA`` y ``DETENIDO_MINIMO``. El cronómetro
+    T es la parada exigida por el docente (``t_parada_s``): al cumplirse, el
+    robot reanuda por sí solo.
 
     Reglas (tabla data-model + FR-018..FR-025):
     - Un PARE nuevo confirmado detiene (FR-015) e inicia T.
-    - El SIGA confirmado durante la detención (incluido el co-visible al
-      detenerse, Q-A) queda **armado**; al cumplirse T reanuda (FR-016/FR-017).
-    - Un PARE nuevo durante la detención **no** reinicia T ni invalida el SIGA
-      armado (Q-C, FR-020/FR-021).
-    - Al cumplirse T sin SIGA armado el robot queda en ``DETENIDO_ESPERANDO_SIGA``
-      y reanuda solo ante un SIGA confirmado (FR-017).
+    - Al cumplirse T el robot vuelve a ``EN_MARCHA`` y reanuda, haya visto SIGA o
+      no. La SIGA no condiciona la reanudación; se sigue registrando como
+      ocurrencia para la rúbrica.
+    - Un PARE nuevo durante la detención **no** reinicia T (Q-C, FR-020/FR-021).
     - Una pérdida momentánea ≤ K no afecta el estado ni el cronómetro, porque la
       máquina solo reacciona a confirmaciones de flanco de subida (FR-018/FR-022).
 
@@ -115,7 +115,6 @@ class MaquinaEstados:
             causa=CAUSA_INICIO,
         )
         self._t_inicio_parada: float | None = None
-        self._siga_armado: bool = False
         self._fotograma: int = 0
 
     @property
@@ -136,14 +135,15 @@ class MaquinaEstados:
         """Avanza la FSM un fotograma con las señales confirmadas y sus eventos.
 
         ``presentes`` agrupa las señales confirmadas en el instante (incluidas
-        las co-visibles, Q-A). ``eventos`` transporta las confirmaciones de
-        PARE/SIGA y las pérdidas ya latcheadas por la etapa de detección.
-        Devuelve la decisión de movimiento y las transiciones nuevas (FR-023).
+        las co-visibles, Q-A). Se conserva en la firma por contrato con el
+        pipeline, pero la reanudación ya no depende de él: el cronómetro decide.
+        ``eventos`` transporta las confirmaciones de PARE/SIGA y las pérdidas ya
+        latcheadas por la etapa de detección. Devuelve la decisión de movimiento
+        y las transiciones nuevas (FR-023).
         """
         _exigir(t_s >= self._t_inicial, "t_s no debe retroceder respecto a t_inicial")
 
         pare_confirmado_nuevo = self._confirmado(eventos, ClaseSenal.PARE)
-        siga_confirmado_nuevo = self._confirmado(eventos, ClaseSenal.SIGA)
 
         transiciones: list[TransicionEstado] = []
         decision: DecisionMovimiento
@@ -159,62 +159,29 @@ class MaquinaEstados:
                 )
                 self._estado = EstadoRobot.DETENIDO_MINIMO
                 self._t_inicio_parada = t_s
-                if ClaseSenal.SIGA in presentes:
-                    self._siga_armado = True
                 decision = _no_autorizado(CAUSA_PARE_DETENIDO)
             else:
                 decision = _autorizado(CAUSA_INICIO)
 
-        elif self._estado is EstadoRobot.DETENIDO_MINIMO:
-            if ClaseSenal.SIGA in presentes or siga_confirmado_nuevo:
-                self._siga_armado = True
+        else:
             _exigir(
                 self._t_inicio_parada is not None,
                 "DETENIDO_MINIMO exige cronómetro iniciado",
             )
             t_transcurrido = t_s - self._t_inicio_parada
             if t_transcurrido >= self._params.t_parada_s:
-                if self._siga_armado:
-                    self._registrar_transicion(
-                        transiciones,
-                        EstadoRobot.DETENIDO_MINIMO,
-                        EstadoRobot.EN_MARCHA,
-                        CausaTransicion.T_CUMPLIDO,
-                        t_s,
-                    )
-                    self._estado = EstadoRobot.EN_MARCHA
-                    self._t_inicio_parada = None
-                    self._siga_armado = False
-                    decision = _autorizado(CAUSA_T_CUMPLIDO_CON_SIGA)
-                else:
-                    self._registrar_transicion(
-                        transiciones,
-                        EstadoRobot.DETENIDO_MINIMO,
-                        EstadoRobot.DETENIDO_ESPERANDO_SIGA,
-                        CausaTransicion.T_CUMPLIDO,
-                        t_s,
-                    )
-                    self._estado = EstadoRobot.DETENIDO_ESPERANDO_SIGA
-                    self._t_inicio_parada = None
-                    decision = _no_autorizado(CAUSA_T_CUMPLIDO_SIN_SIGA)
-            else:
-                decision = _no_autorizado(CAUSA_T_MINIMO_EN_CURSO)
-
-        else:
-            if siga_confirmado_nuevo:
                 self._registrar_transicion(
                     transiciones,
-                    EstadoRobot.DETENIDO_ESPERANDO_SIGA,
+                    EstadoRobot.DETENIDO_MINIMO,
                     EstadoRobot.EN_MARCHA,
-                    CausaTransicion.SIGA_CONFIRMADO,
+                    CausaTransicion.T_CUMPLIDO,
                     t_s,
                 )
                 self._estado = EstadoRobot.EN_MARCHA
                 self._t_inicio_parada = None
-                self._siga_armado = False
-                decision = _autorizado(CausaTransicion.SIGA_CONFIRMADO.value)
+                decision = _autorizado(CAUSA_T_CUMPLIDO)
             else:
-                decision = _no_autorizado(CAUSA_ESPERANDO_SIGA)
+                decision = _no_autorizado(CAUSA_T_MINIMO_EN_CURSO)
 
         self._decision = decision
         self._fotograma += 1

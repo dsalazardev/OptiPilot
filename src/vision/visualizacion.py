@@ -179,7 +179,7 @@ def anotar(
 
     ``cv2.putText`` no dibuja tildes ni caracteres fuera de ASCII, así que los
     rótulos del panel se escriben sin acentos; la causa de la decisión sí puede
-    llevar el guion bajo de ``T_CUMPLIDO_CON_SIGA``.
+    llevar el guion bajo de ``T_CUMPLIDO``.
 
     ``params`` y ``decision`` son opcionales para no romper a los consumidores de
     001: sin ellos se dibuja exactamente lo mismo que antes. Con ellos se añade

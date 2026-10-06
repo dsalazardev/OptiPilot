@@ -55,11 +55,14 @@ class ClaseSenal(StrEnum):
 
 
 class EstadoRobot(StrEnum):
-    """Estados observables de la máquina PARE/SIGA (FR-015)."""
+    """Estados observables de la máquina PARE/SIGA (FR-015).
+
+    Dos estados: en marcha y detenido por el cronómetro T. El robot reanuda por
+    sí solo al cumplirse T, así que no existe un estado de espera de SIGA.
+    """
 
     EN_MARCHA = "EN_MARCHA"
     DETENIDO_MINIMO = "DETENIDO_MINIMO"
-    DETENIDO_ESPERANDO_SIGA = "DETENIDO_ESPERANDO_SIGA"
 
 
 class PermisoMovimiento(StrEnum):
@@ -75,7 +78,7 @@ class DecisionMovimiento:
 
     ``data-model.md`` §8 exige acompañar el veredicto de una ``causa: str`` que
     explique por qué se autoriza o no el movimiento (p. ej. ``PARE_CONFIRMADO``,
-    ``T_CUMPLIDO_CON_SIGA``, ``SIGA_CONFIRMADO``, ``INICIO``). Al ser la causa
+    ``T_CUMPLIDO``, ``INICIO``). Al ser la causa
     distinta en cada emisión, la decisión es un value object frozen y no un enum
     simple: el veredicto sigue siendo un ``StrEnum`` (``PermisoMovimiento``) para
     poder compararse con ``is`` y serializarse sin ambigüedad.
@@ -98,7 +101,6 @@ class CausaTransicion(StrEnum):
     INICIO = "INICIO"
     PARE_CONFIRMADO = "PARE_CONFIRMADO"
     T_CUMPLIDO = "T_CUMPLIDO"
-    SIGA_CONFIRMADO = "SIGA_CONFIRMADO"
     REANUDACION = "REANUDACION"
     REARME = "REARME"
 

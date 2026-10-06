@@ -135,3 +135,24 @@ class ColaTransporte:
         """
         with self._lock:
             self._pendientes.clear()
+
+    def forzar(self, comando: ComandoMovimiento) -> None:
+        """Deja ``comando`` como único pendiente, aunque repita el último enviado.
+
+        **Por qué existe.** El enlace del robot recibe **una orden cada 24
+        fotogramas**: el bucle de visión llama a este método en cada turno para
+        mandar la decisión vigente, sea o no distinta de la anterior. Con
+        ``encolar`` la deduplicación descartaría esa repetición —el robot se
+        quedaría con la primera orden y se pararía—, así que aquí se encola
+        siempre.
+
+        **Y por qué vacía antes.** Dejar el comando como *único* pendiente hace
+        dos cosas a la vez: el robot recibe la decisión **actual** y nunca un
+        atraso acumulado si el enlace falló un momento; y cuando la FSM veta el
+        movimiento (PARE en curso) el ``DETENER`` no puede salir detrás de una
+        corrección rezagada. Durante los 3 s de la parada ningún comando de
+        movimiento puede colarse.
+        """
+        with self._lock:
+            self._pendientes.clear()
+            self._pendientes.append(comando)

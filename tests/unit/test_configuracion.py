@@ -34,7 +34,7 @@ def test_por_defecto_tiene_los_valores_del_contrato() -> None:
     assert (parametros.vertices_objetivo, parametros.tolerancia_vertices) == (8, 1)
     assert parametros.presupuesto_latencia_frames == 8
     assert parametros.kernel_morfologico_px == 5
-    assert parametros.roi_linea == RectanguloNormalizado(0.15, 0.10, 0.70, 0.45)
+    assert parametros.roi_linea == RectanguloNormalizado(0.05, 0.10, 0.90, 0.45)
     assert parametros.roi_senales == RectanguloNormalizado(0.10, 0.05, 0.80, 0.55)
     assert parametros.rangos_hsv_rojo == (
         RangoHSV(0, 10, 120, 255, 90, 255),
@@ -51,13 +51,14 @@ def test_cargar_sin_ruta_devuelve_defaults() -> None:
 def test_fusion_parcial_conserva_defaults(tmp_path: Path) -> None:
     ruta = _escribir(
         tmp_path,
-        {"t_parada_s": 5.0, "n_confirmacion": 4, "roi_linea": {"x": 0.2}},
+        {"t_parada_s": 5.0, "n_confirmacion": 4, "roi_linea": {"h": 0.30}},
     )
     parametros = cargar_parametros(ruta)
     assert parametros.t_parada_s == 5.0
     assert parametros.n_confirmacion == 4
-    assert parametros.roi_linea.x == 0.2
-    assert parametros.roi_linea.w == 0.70
+    assert parametros.roi_linea.h == 0.30
+    # El ancho no se tocó: conserva el default (ROI ensanchada para las curvas).
+    assert parametros.roi_linea.w == 0.90
     assert parametros.rango_hsv_linea == ParametrosConfiguracion.por_defecto().rango_hsv_linea
 
 
@@ -184,7 +185,7 @@ def test_control_no_altera_los_parametros_de_001() -> None:
     assert (parametros.n_confirmacion, parametros.k_tolerancia, parametros.x_rearme) == (3, 2, 5)
     assert parametros.rango_hsv_linea == RangoHSV(0, 179, 0, 255, 0, 110)
     assert parametros.vertices_objetivo == 8
-    assert parametros.roi_linea == RectanguloNormalizado(0.15, 0.10, 0.70, 0.45)
+    assert parametros.roi_linea == RectanguloNormalizado(0.05, 0.10, 0.90, 0.45)
 
 
 def test_control_se_puede_sobreescribir_desde_json(tmp_path: Path) -> None:

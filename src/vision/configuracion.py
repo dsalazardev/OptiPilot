@@ -66,7 +66,13 @@ class RectanguloNormalizado:
     h: float
 
 
-ROI_LINEA_POR_DEFECTO = RectanguloNormalizado(x=0.15, y=0.10, w=0.70, h=0.45)
+#: ROI de la línea. Ancha a propósito: con la cámara mirando al suelo, en una
+#: curva la línea se va a un lado del cuadro, y si la ROI no llega hasta ahí el
+#: estimador la declara **perdida** en vez de "muy desviada". Ese era el fallo de
+#: fondo: el robot no corregía la curva, la perdía, entraba en recuperación a
+#: ciegas y acababa parado por GRACIA_AGOTADA. El 0.05..0.95 deja medir la
+#: desviación casi hasta el borde del fotograma.
+ROI_LINEA_POR_DEFECTO = RectanguloNormalizado(x=0.05, y=0.10, w=0.90, h=0.45)
 ROI_SENALES_POR_DEFECTO = RectanguloNormalizado(x=0.10, y=0.05, w=0.80, h=0.55)
 RANGO_HSV_LINEA_POR_DEFECTO = RangoHSV(h_min=0, h_max=179, s_min=0, s_max=255, v_min=0, v_max=110)
 RANGOS_HSV_ROJO_POR_DEFECTO = (
@@ -86,8 +92,15 @@ PRESUPUESTO_LATENCIA_FRAMES_POR_DEFECTO = 8
 FPS_OBJETIVO_POR_DEFECTO = 30.0
 VERTICES_OBJETIVO_POR_DEFECTO = 8
 TOLERANCIA_VERTICES_POR_DEFECTO = 1
-ASPECTO_MIN_POR_DEFECTO = 0.70
-ASPECTO_MAX_POR_DEFECTO = 1.40
+ASPECTO_MIN_POR_DEFECTO = 0.45
+# El rango de aspecto tiene que admitir el octágono PLANO visto en perspectiva.
+# Medido (2026-10-06): con la cámara inclinada, el octágono del suelo llega
+# comprimido en vertical y su aspecto (ancho/alto) crece — 1.42 a 46°, 2.00 a
+# 60°. Con el rango anterior [0.70, 1.40] el STOP se rechazaba a partir de ~45°
+# de inclinación, que es justo el montaje del robot (cámara hacia el suelo), así
+# que la señal nunca se confirmaba. El tope 2.20 admite hasta ~60° y sigue
+# rechazando las franjas alargadas del footage de ensayo (aspecto mediano 2.47).
+ASPECTO_MAX_POR_DEFECTO = 2.20
 
 # --- Control de trayectoria (specs/002 — Objetivos 3 y 4 del Reto 1) ---------
 # `x_objetivo` es un parámetro, no el centro geométrico: la mediana de x por
@@ -119,6 +132,21 @@ MAC_BLUETOOTH_POR_DEFECTO = "00:1B:10:21:2D:C0"
 # Cota superior de una escritura bloqueada en el socket (antes `timeout_serial_s`,
 # renombrado porque ya no hay puerto serie: es un socket RFCOMM).
 TIMEOUT_TRANSPORTE_S_POR_DEFECTO = 0.20
+
+# --- Cadencia y sentido del enlace (ajuste de pista) -------------------------
+#: Cada cuántos fotogramas se le manda UNA orden al robot. ``por_defecto()``
+#: describe el caso de una orden por fotograma, que es el que fijan las pruebas
+#: de la ley de control (los contadores de la FSM y de la recuperación están en
+#: fotogramas); la pista configura la cadencia real en ``config/vision.json``
+#: (24 fotogramas ≈ 0.8 s a 30 fps). El control usa este valor para traducir sus
+#: contadores a tiempo real: sin él, una gracia de 5 fotogramas se agotaría antes
+#: de la primera orden y el robot se pararía sin llegar a buscar la línea.
+FOTOGRAMAS_POR_ORDEN_POR_DEFECTO = 1
+
+#: Invierte el sentido de las correcciones. Si en pista el robot girase hacia el
+#: lado contrario al que indica la línea (cámara girada o motores cruzados), se
+#: pone a ``true`` y queda corregido sin tocar código ni reinvertir el montaje.
+INVERTIR_LADOS_POR_DEFECTO = False
 
 # V5: seis pares hexadecimales separados por dos puntos. Se valida al cargar la
 # configuración para que una MAC mal escrita falle en el arranque y no se
@@ -155,6 +183,8 @@ _CAMPOS_CONOCIDOS = frozenset(
         "n_gracia_busqueda",
         "mac_bluetooth",
         "timeout_transporte_s",
+        "fotogramas_por_orden",
+        "invertir_lados",
     }
 )
 
@@ -191,6 +221,9 @@ class ParametrosConfiguracion:
     n_gracia_busqueda: int = N_GRACIA_BUSQUEDA_POR_DEFECTO
     mac_bluetooth: str = MAC_BLUETOOTH_POR_DEFECTO
     timeout_transporte_s: float = TIMEOUT_TRANSPORTE_S_POR_DEFECTO
+    # Ajuste de pista: cadencia de órdenes y sentido de la corrección.
+    fotogramas_por_orden: int = FOTOGRAMAS_POR_ORDEN_POR_DEFECTO
+    invertir_lados: bool = INVERTIR_LADOS_POR_DEFECTO
 
     def __post_init__(self) -> None:
         _validar(self)
@@ -309,6 +342,10 @@ def _validar_control(p: ParametrosConfiguracion) -> None:
     # V6: con 0 el socket quedaría en modo bloqueante infinito.
     if p.timeout_transporte_s <= 0.0:
         raise ConfiguracionInvalidaError("timeout_transporte_s", "debe ser > 0")
+    if p.fotogramas_por_orden < 1:
+        raise ConfiguracionInvalidaError(
+            "fotogramas_por_orden", "debe ser >= 1 (una orden cada N fotogramas)"
+        )
 
 
 def _validar_rectangulo(campo: str, rectangulo: RectanguloNormalizado) -> None:
@@ -451,6 +488,16 @@ def _leer_texto(datos: Mapping[str, Any], campo: str, defecto: str) -> str:
     return bruto
 
 
+def _leer_booleano(datos: Mapping[str, Any], campo: str, defecto: bool) -> bool:
+    """Lee un booleano estricto: solo ``true``/``false`` valen."""
+    if campo not in datos or datos[campo] is None:
+        return defecto
+    bruto = datos[campo]
+    if not isinstance(bruto, bool):
+        raise ConfiguracionInvalidaError(campo, "debe ser true o false")
+    return bruto
+
+
 def _fusionar(datos: Mapping[str, Any]) -> ParametrosConfiguracion:
     desconocidos = sorted(set(datos) - _CAMPOS_CONOCIDOS)
     if desconocidos:
@@ -493,6 +540,10 @@ def _fusionar(datos: Mapping[str, Any]) -> ParametrosConfiguracion:
     timeout_transporte_s=_leer_numero(
         datos, "timeout_transporte_s", defecto.timeout_transporte_s
         ),
+    fotogramas_por_orden=_leer_entero(
+        datos, "fotogramas_por_orden", defecto.fotogramas_por_orden
+    ),
+    invertir_lados=_leer_booleano(datos, "invertir_lados", defecto.invertir_lados),
     )
 
 

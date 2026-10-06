@@ -73,7 +73,8 @@ def test_octagono_pare_genera_candidato_valido(segmentar, extraer) -> None:
     assert candidato.es_valido is True
     assert candidato.motivo_invalidez is None
     assert 7 <= candidato.n_vertices <= 9
-    assert 0.70 <= candidato.aspecto <= 1.40
+    # Rango que admite el octágono plano visto en perspectiva (ver configuracion).
+    assert 0.45 <= candidato.aspecto <= 2.20
     assert candidato.area_rel >= 0.001
     assert candidato.area_px > 0
     x, y, w, h = candidato.caja_px
@@ -91,7 +92,7 @@ def test_octagono_siga_genera_candidato_valido(segmentar, extraer) -> None:
     assert candidato.es_valido is True
     assert candidato.motivo_invalidez is None
     assert 7 <= candidato.n_vertices <= 9
-    assert 0.70 <= candidato.aspecto <= 1.40
+    assert 0.45 <= candidato.aspecto <= 2.20
 
 
 def test_escena_sin_senales_no_genera_candidatos(segmentar, extraer) -> None:
@@ -134,9 +135,27 @@ def test_franja_fina_no_rompe_y_es_candidato_invalido(segmentar, extraer) -> Non
     assert "vertices" in candidato.motivo_invalidez
 
 
-def test_octagono_aplastado_invalido_por_aspecto(segmentar, extraer) -> None:
+@pytest.mark.parametrize("escala_x", [1.5, 2.0])
+def test_octagono_en_perspectiva_es_valido(segmentar, extraer, escala_x) -> None:
+    """Un octágono plano comprimido por la perspectiva debe ser candidato VÁLIDO.
+
+    Es el caso real del reto: la señal está en el suelo y la cámara la ve
+    inclinada, así que llega más ancha que alta. Antes se rechazaba por aspecto
+    (1.42 a 46°, 2.00 a 60°) y el STOP nunca se confirmaba.
+    """
     imagen = crear_fondo()
-    cv2.fillPoly(imagen, [_octagono_aplastado()], ROJO_BGR)
+    cv2.fillPoly(imagen, [_octagono_aplastado(escala_x=escala_x)], ROJO_BGR)
+    candidatos = extraer(segmentar(imagen))
+    assert len(candidatos) == 1
+    candidato = candidatos[0]
+    assert candidato.es_valido is True, candidato.motivo_invalidez
+    assert candidato.n_vertices == 8
+
+
+def test_octagono_extremo_sigue_siendo_invalido_por_aspecto(segmentar, extraer) -> None:
+    """Más allá de ~60° de inclinación la forma deja de ser un octágono creíble."""
+    imagen = crear_fondo()
+    cv2.fillPoly(imagen, [_octagono_aplastado(escala_x=3.5)], ROJO_BGR)
     candidatos = extraer(segmentar(imagen))
     assert len(candidatos) == 1
     candidato = candidatos[0]

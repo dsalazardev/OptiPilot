@@ -34,6 +34,12 @@ from src.vision.modelos import (
 
 __all__ = ["ControlTrayectoria"]
 
+#: Cada cuántos turnos, una vez agotada la gracia, el robot reintenta la
+#: búsqueda en vez de quedarse detenido en firme. Con 4, uno de cada cuatro
+#: turnos asoma hacia el lado memorizado (≈3 s parado y uno buscando a la
+#: cadencia de 24 fotogramas), suficiente para reubicarse sin barrer en redondo.
+_REINTENTOS_BUSQUEDA = 4
+
 
 class ControlTrayectoria:
     """Convierte la posición lateral estimada en un comando de movimiento.
@@ -49,6 +55,10 @@ class ControlTrayectoria:
         self._params = params
         self._lateral: LadoConocido | None = None
         self._seguimiento: tuple[ComandoMovimiento, CausaComando] | None = None
+        #: Fotogramas transcurridos desde que se agotó la gracia de búsqueda. Se
+        #: lleva aparte de ``fotogramas_perdidos`` para no romper el congelado de
+        #: la memoria (FR-020) que documenta el diagnóstico.
+        self._reintento = 0
         self._fotograma = 0
 
     # ------------------------------------------------------------------
@@ -76,6 +86,7 @@ class ControlTrayectoria:
         """Vacía la memoria para que no sobreviva entre corridas (FR-023, Q13)."""
         self._lateral = None
         self._seguimiento = None
+        self._reintento = 0
         self._fotograma = 0
 
     # ------------------------------------------------------------------
@@ -95,7 +106,9 @@ class ControlTrayectoria:
             # fabricado mandaría a buscar en una dirección sin fundamento.
             lado = self._lateral.lado if self._lateral is not None else None
 
-        # Q10: con línea visible el contador de pérdidas vuelve a cero.
+        # Q10: con línea visible el contador de pérdidas vuelve a cero, y con él
+        # el reintento de búsqueda: ya no hace falta.
+        self._reintento = 0
         self._lateral = (
             LadoConocido(lado=lado, fotograma=self._fotograma, fotogramas_perdidos=0)
             if lado is not None
@@ -118,9 +131,14 @@ class ControlTrayectoria:
         magnitud = abs(error)
 
         if magnitud >= zona + hist:
-            if error > 0:
-                return ComandoMovimiento.DERECHA, CausaComando.CORRECCION_DERECHA
-            return ComandoMovimiento.IZQUIERDA, CausaComando.CORRECCION_IZQUIERDA
+            lado = Lado.DERECHA if error > 0 else Lado.IZQUIERDA
+            comando = self._hacia(lado)
+            causa = (
+                CausaComando.CORRECCION_DERECHA
+                if comando is ComandoMovimiento.DERECHA
+                else CausaComando.CORRECCION_IZQUIERDA
+            )
+            return comando, causa
         if magnitud <= zona - hist:
             return ComandoMovimiento.AVANZAR, CausaComando.SEGUIMIENTO
         # Banda de histéresis: se mantiene el último comando de seguimiento. Sin
@@ -128,6 +146,19 @@ class ControlTrayectoria:
         if self._seguimiento is None:
             return ComandoMovimiento.AVANZAR, CausaComando.SEGUIMIENTO
         return self._seguimiento
+
+    def _hacia(self, lado: Lado) -> ComandoMovimiento:
+        """Comando que acerca el robot al lado donde está la línea.
+
+        ``invertir_lados`` existe por el montaje: si la cámara va girada respecto
+        al chasis, o los motores están cruzados, seguir la línea exige girar al
+        lado contrario del que parece. En vez de rehacer el montaje en plena
+        pista, se invierte aquí y el resto del sistema no cambia.
+        """
+        derecha = lado is Lado.DERECHA
+        if self._params.invertir_lados:
+            derecha = not derecha
+        return ComandoMovimiento.DERECHA if derecha else ComandoMovimiento.IZQUIERDA
 
     # ------------------------------------------------------------------
     # Fotograma sin línea
@@ -149,16 +180,34 @@ class ControlTrayectoria:
                 lateral=None,
             )
 
-        limite = self._params.n_gracia_busqueda
+        # La gracia está expresada en TURNOS (órdenes enviadas), no en fotogramas.
+        # Con una cadencia de 24 fotogramas por orden, contar fotogramas agotaría
+        # la búsqueda antes de mandar la primera y el robot se pararía sin llegar
+        # a reubicarse: es lo que dejaba la recuperación muerta en la pista.
+        paso = max(1, self._params.fotogramas_por_orden)
+        limite = self._params.n_gracia_busqueda * paso
         if self._lateral.fotogramas_perdidos > limite:
-            # La gracia ya se agotó en un fotograma anterior: la memoria queda
-            # congelada en el valor con el que se falló (FR-020).
+            # La gracia se agotó: el robot se detiene, pero **no se queda
+            # clavado**. Cada `_REINTENTOS_BUSQUEDA` turnos vuelve a asomarse
+            # hacia el lado memorizado. Sin este reintento, al quedarse parado la
+            # línea no volvía a entrar en el cuadro y el robot quedaba muerto
+            # sobre la pista al salir de una curva; con él puede reubicarse sin
+            # barrer en redondo. La memoria de fotogramas_perdidos sigue congelada
+            # (FR-020); el reintento lo lleva su propio contador.
+            self._reintento += 1
+            if (self._reintento // paso) % _REINTENTOS_BUSQUEDA == 0:
+                return DecisionControl(
+                    comando=self._hacia(self._lateral.lado),
+                    causa=CausaComando.RECUPERACION,
+                    lateral=self._lateral,
+                )
             return DecisionControl(
                 comando=ComandoMovimiento.DETENER,
                 causa=CausaComando.GRACIA_AGOTADA,
                 lateral=self._lateral,
             )
 
+        self._reintento = 0
         self._lateral = LadoConocido(
             lado=self._lateral.lado,
             fotograma=self._lateral.fotograma,
@@ -174,11 +223,7 @@ class ControlTrayectoria:
                 lateral=self._lateral,
             )
 
-        comando = (
-            ComandoMovimiento.DERECHA
-            if self._lateral.lado is Lado.DERECHA
-            else ComandoMovimiento.IZQUIERDA
-        )
+        comando = self._hacia(self._lateral.lado)
         return DecisionControl(
             comando=comando,
             causa=CausaComando.RECUPERACION,

@@ -38,6 +38,8 @@ _COLOR_LATERAL = (0, 180, 255)
 _COLOR_DETENER = (0, 0, 255)
 _COLOR_MANUAL = (0, 165, 255)
 _COLOR_AUTO = (0, 255, 0)
+_COLOR_ROI_LINEA = (0, 255, 255)
+_COLOR_ROI_SENALES = (255, 128, 0)
 
 #: Recordatorio de teclas para la demostración en vivo (se dibuja abajo a la
 #: derecha). Sin esto, en plena pista nadie recuerda el mapa de teclas.
@@ -174,6 +176,28 @@ def _ayuda_teclas(anotada: np.ndarray) -> None:
     _texto(anotada, _AYUDA_TECLAS, (x, anotada.shape[0] - 10))
 
 
+def _rectangulo_roi(
+    anotada: np.ndarray, roi: tuple[int, int, int, int], color: tuple[int, int, int], etiqueta: str
+) -> None:
+    x, y, ancho, alto = roi
+    if ancho <= 0 or alto <= 0:
+        return
+    cv2.rectangle(anotada, (x, y), (x + ancho - 1, y + alto - 1), color, 2)
+    _texto(anotada, etiqueta, (x + 4, max(12, y + 16)))
+
+
+def _dibujar_rois(anotada: np.ndarray, segmentacion) -> None:
+    """Marco de las dos ROI sobre el fotograma.
+
+    Es la única forma de juzgar **en pista** si la ROI cubre la parte de la pista
+    que el robot necesita: sin el marco dibujado, ajustar ``roi_linea`` es a
+    ciegas. El montaje manda —la cámara mira hacia el suelo— y este recuadro
+    deja ver de un vistazo si la banda cae donde debe.
+    """
+    _rectangulo_roi(anotada, segmentacion.roi_linea, _COLOR_ROI_LINEA, "ROI linea")
+    _rectangulo_roi(anotada, segmentacion.roi_senales, _COLOR_ROI_SENALES, "ROI senales")
+
+
 def _dibujar_control(
     anotada: np.ndarray,
     resultado: ResultadoProcesamiento,
@@ -263,6 +287,7 @@ def anotar(
     _superponer(anotada, segmentacion.mascara_linea, _COLOR_LINEA, _ALFA_LINEA)
     _superponer(anotada, segmentacion.mascara_roja, _COLOR_PARE, _ALFA_SENAL)
     _superponer(anotada, segmentacion.mascara_verde, _COLOR_SIGA, _ALFA_SENAL)
+    _dibujar_rois(anotada, segmentacion)
     _dibujar_candidatos(anotada, resultado)
     _dibujar_confirmadas(anotada, resultado)
     if params is not None:

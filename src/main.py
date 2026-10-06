@@ -58,11 +58,14 @@ from src.vision.configuracion import (
 from src.vision.maquina_estados import MaquinaEstados
 from src.vision.metricas import MetricasControl, MetricasCorrida
 from src.vision.modelos import (
+    CausaComando,
     ClaseSenal,
     ComandoMovimiento,
+    DecisionCompuesta,
     EstadoRobot,
     MarcadorVisibilidadPlena,
     Parada,
+    PosicionLinea,
 )
 from src.vision.pipeline import PipelineVision
 from src.vision.visualizacion import anotar
@@ -133,6 +136,100 @@ def _abrir_video(ruta: Path) -> tuple[cv2.VideoCapture, float]:
         fps = 0.0
     return captura, fps
 
+
+#: Segundos sin recibir un fotograma tras los cuales se da la fuente en vivo por
+#: perdida. Un parón más largo que esto (WiFi que se cae, celular que se cierra)
+#: no se distingue de un stream terminado, y preferimos cerrar a mostrar una
+#: imagen congelada como si fuera real.
+_TIMEOUT_SIN_FOTOGRAMA_S = 5.0
+
+
+class _CapturaUltimo:
+    """Entrega SIEMPRE el fotograma más reciente de una cámara en vivo.
+
+    **El problema que resuelve.** Un stream MJPEG por WiFi llega encolado: si el
+    bucle de visión consume más lento de lo que la cámara produce, cada segundo
+    el atraso crece y el robot acaba decidiendo sobre una imagen de hace varios
+    segundos. No es lentitud de cómputo, es *backlog*.
+
+    **La solución.** Un hilo lee sin parar del ``cv2.VideoCapture`` real y
+    sobrescribe un único hueco con el último fotograma. El consumidor llama a
+    ``read()`` y recibe ese hueco: los fotogramas que quedaron atrás se descartan
+    solos, así que el atraso queda acotado a ~1 fotograma en vez de crecer.
+
+    El objeto es un doble de ``cv2.VideoCapture`` para lo que usa ``_iterar_captura``
+    (``read``/``release``), de modo que esa función —y su reloj de pared— sigue
+    sirviendo sin cambios.
+    """
+
+    def __init__(self, captura: cv2.VideoCapture, intervalo_s: float = 0.001) -> None:
+        self._captura = captura
+        self._intervalo_s = intervalo_s
+        self._lock = threading.Lock()
+        self._fotograma: np.ndarray | None = None
+        self._leidos = 0
+        self._consumidos = 0
+        self._parar = threading.Event()
+        self._hilo = threading.Thread(target=self._bucle, name="camara", daemon=True)
+        self._hilo.start()
+
+    def _bucle(self) -> None:
+        while not self._parar.is_set():
+            try:
+                exito, imagen = self._captura.read()
+            except Exception:  # noqa: BLE001 - la cámara no debe tumbar el hilo
+                time.sleep(self._intervalo_s)
+                continue
+            if not exito or imagen is None:
+                time.sleep(self._intervalo_s)
+                continue
+            with self._lock:
+                self._fotograma = imagen
+                self._leidos += 1
+
+    def read(self) -> tuple[bool, np.ndarray | None]:
+        """Devuelve el fotograma más reciente, esperando solo si no hay ninguno nuevo.
+
+        Descarta los fotogramas que la cámara produjo mientras el consumidor
+        procesaba el anterior: se devuelve el último, no el que siga en la cola.
+        """
+        limite = time.perf_counter() + _TIMEOUT_SIN_FOTOGRAMA_S
+        while time.perf_counter() < limite:
+            with self._lock:
+                if self._leidos > self._consumidos:
+                    self._consumidos = self._leidos
+                    return True, self._fotograma
+            time.sleep(self._intervalo_s)
+        return False, None
+
+    def release(self) -> None:
+        """Detiene el hilo lector y libera la captura real."""
+        self._parar.set()
+        self._hilo.join(timeout=1.0)
+        self._captura.release()
+
+
+def _abrir_captura_viva(objetivo: int | str) -> cv2.VideoCapture | None:
+    """Abre una cámara y le pide el búfer mínimo. ``None`` si no se pudo abrir.
+
+    ``CAP_PROP_BUFFERSIZE=1`` es la otra mitad del arreglo del atraso: para una
+    fuente en vivo, cada fotograma que el backend guarda por delante es atraso
+    puro. No todos los backends lo respetan, pero cuando lo hacen se suma al
+    efecto del hilo lector.
+    """
+    captura = cv2.VideoCapture(objetivo)
+    if not captura.isOpened():
+        captura.release()
+        return None
+    constante = getattr(cv2, "CAP_PROP_BUFFERSIZE", None)
+    if constante is not None:
+        try:
+            captura.set(constante, 1)
+        except Exception:  # noqa: BLE001 - el backend puede no soportarlo
+            pass
+    return captura
+
+
 def _iterar_fotogramas(
     fuente: str,
     fps_por_defecto: float,
@@ -145,25 +242,25 @@ def _iterar_fotogramas(
     cronómetro T del PARE mida segundos reales; los archivos y directorios usan
     ``indice / fps`` para que la máquina de estados reciba tiempos
     reproducibles (FR-017). Las fuentes en vivo se enderezan con ``_orientar``
-    según ``rotacion`` para que el ROI calibrado aplique tal cual.
+    según ``rotacion`` para que el ROI calibrado aplique tal cual, y pasan por
+    ``_CapturaUltimo`` para no arrastrar atraso de un stream MJPEG.
     """
     if _es_fuente_viva(fuente):
         # Un índice es un int; una URL se pasa como texto, sin reinterpretarla.
         objetivo: int | str = int(fuente) if fuente.isdigit() else fuente
-        captura = cv2.VideoCapture(objetivo)
-        if not captura.isOpened():
-            captura.release()
+        captura = _abrir_captura_viva(objetivo)
+        if captura is None:
             raise FuenteInvalidaError(f"no se pudo abrir la fuente en vivo: {fuente}")
-        fps = float(captura.get(cv2.CAP_PROP_FPS))
-        if not np.isfinite(fps) or fps <= 0:
-            fps = fps_por_defecto
+        # El hilo lector descarta los fotogramas atrasados: sin él, un stream
+        # MJPEG por WiFi acumula atraso y el robot decide sobre imágenes viejas.
+        envuelta = _CapturaUltimo(captura)
         try:
             for indice, t_s, imagen in _iterar_captura(
-                captura, fps, max_fotogramas, reloj_real=True
+                envuelta, fps_por_defecto, max_fotogramas, reloj_real=True
             ):
                 yield indice, t_s, _orientar(imagen, rotacion)
         finally:
-            captura.release()
+            envuelta.release()
         return
 
     ruta = Path(fuente)
@@ -288,10 +385,11 @@ def _construir_transporte(nombre: str, params: ParametrosConfiguracion) -> Trans
         return TransporteSPP(mac=params.mac_bluetooth, timeout_s=params.timeout_transporte_s)
     raise ConfiguracionInvalidaError("transporte", f"transporte desconocido: {nombre}")
 
+
 class _BombeoTransporte:
     """Hilo que drena la cola hacia el transporte, fuera del bucle de visión.
 
-    El bucle de visión solo llama a ``encolar`` (O(1), sin E/S); este hilo hace
+    El bucle de visión solo llama a ``forzar`` (O(1), sin E/S); este hilo hace
     el ``sendall`` bloqueante. Esa separación es lo que garantiza que un enlace
     caído no congele la detección (FR-031, SC-005).
 
@@ -299,7 +397,12 @@ class _BombeoTransporte:
     ``esperar`` con timeout evita girar en vacío y permite un apagado rápido.
     """
 
-    def __init__(self, cola: ColaTransporte, transporte: Transporte, intervalo_s: float = 0.005) -> None:
+    def __init__(
+        self,
+        cola: ColaTransporte,
+        transporte: Transporte,
+        intervalo_s: float = 0.005,
+    ) -> None:
         self._cola = cola
         self._transporte = transporte
         self._intervalo_s = intervalo_s
@@ -320,6 +423,7 @@ class _BombeoTransporte:
         while not self._parar.is_set():
             self._cola.drenar(self._transporte)
             self._parar.wait(self._intervalo_s)
+
 
 #: Teclas que mueven el robot en modo manual. Los valores son ``keysym`` de
 #: tkinter en minúsculas: se comparan contra ``evento.keysym.lower()``, de modo
@@ -835,6 +939,39 @@ def _resumen_control_consola(resumen: dict) -> str:
         ]
     )
 
+#: Desviación (por encima de la zona muerta) a partir de la cual la corrección
+#: gira en TODOS los turnos. Por debajo, se gira en turnos alternos.
+_BANDA_GIRO_FUERTE = 0.15
+
+
+def _intensidad_de_turno(
+    decision: DecisionCompuesta,
+    posicion: PosicionLinea | None,
+    params: ParametrosConfiguracion,
+    turno: int,
+) -> ComandoMovimiento:
+    """Modula la fuerza de la corrección en el turno que toca transmitir.
+
+    La ley de control decide **hacia dónde** corregir. Con la cadencia de la
+    pista —una orden cada ``fotogramas_por_orden``—, girar en TODOS los turnos
+    mientras la desviación persiste es lo que hacía girar de más al robot: cada
+    orden es una acción completa y encadenarlas equivale a un giro continuo.
+
+    Aquí una desviación **moderada** se corrige en turnos alternos (giro, avance,
+    giro, avance), de modo que el robot vuelve a medir la línea entre giro y
+    giro y se reubica en vez de barrer. Solo una desviación **grande** gira en
+    todos los turnos, que es cuando hace falta corregir de verdad.
+    """
+    comando = decision.comando
+    if comando is not ComandoMovimiento.IZQUIERDA and comando is not ComandoMovimiento.DERECHA:
+        return comando
+    if posicion is None or not posicion.valida or posicion.error_norm is None:
+        return comando
+    if abs(posicion.error_norm) >= params.zona_muerta + _BANDA_GIRO_FUERTE:
+        return comando
+    return comando if turno % 2 == 0 else ComandoMovimiento.AVANZAR
+
+
 def _correr(
     params: ParametrosConfiguracion,
     fuente: str,
@@ -854,6 +991,12 @@ def _correr(
     pipeline = PipelineVision(params)
     maquina = MaquinaEstados(params, t_inicial=0.0)
     metricas = MetricasCorrida(corrida_id=corrida_id, fuente=fuente)
+    #: Una orden cada ``fotogramas_por_orden``: el enlace del robot no admite más.
+    cadencia = max(1, params.fotogramas_por_orden)
+    #: Última orden que salió de verdad hacia el robot. El visor dibuja esta y no
+    #: la propuesta del control, porque con la cadencia y la modulación de
+    #: intensidad pueden no coincidir en el mismo fotograma.
+    ultima_orden = None
 
     bombeo = _BombeoTransporte(cola, transporte)
     bombeo.iniciar()
@@ -919,7 +1062,20 @@ def _correr(
             # automático frente a lo que está haciendo el operador. Lo que se
             # suspende es solo la transmisión, no la observación.
             if vista is None or not vista.manual_activo:
-                cola.encolar(decision.comando)
+                if decision.causa is CausaComando.VETO_FSM:
+                    # PARE en curso: el DETENER gana y sale de inmediato, sin
+                    # esperar el turno de la cadencia, y descarta cualquier
+                    # movimiento que hubiera quedado pendiente.
+                    ultima_orden = decision.comando
+                    cola.forzar(ultima_orden)
+                elif indice % cadencia == 0:
+                    # Una sola orden por turno de la cadencia. `forzar` reemplaza
+                    # lo pendiente en vez de acumularlo: el robot recibe siempre
+                    # la decisión actual, nunca un atraso.
+                    ultima_orden = _intensidad_de_turno(
+                        decision, resultado.posicion, params, indice // cadencia
+                    )
+                    cola.forzar(ultima_orden)
 
             if inicio_parada is None and estado.estado is not EstadoRobot.EN_MARCHA:
                 inicio_parada = t_s
@@ -939,7 +1095,9 @@ def _correr(
                 # mandando, no lo que el pipeline habría mandado: si no, la
                 # ventana mentiría justo cuando el operador cree tener el control.
                 comando_mostrado = (
-                    vista.control.comando_actual if manual else decision.comando
+                    vista.control.comando_actual
+                    if manual
+                    else (ultima_orden or decision.comando)
                 )
                 anotada = anotar(
                     imagen,

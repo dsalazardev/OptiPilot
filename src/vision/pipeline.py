@@ -38,6 +38,7 @@ from .modelos import (
     DecisionControl,
     DecisionMovimiento,
     MarcadorVisibilidadPlena,
+    PermisoMovimiento,
     PosicionLinea,
     ResultadoProcesamiento,
 )
@@ -137,7 +138,15 @@ class PipelineVision:
         Si por algún motivo faltaran la posición o la propuesta del control (un
         resultado construido a mano), cae a ``DETENER`` por ``FALLO_SEGURO`` para
         no operar con datos ausentes.
+
+        **Veto de la FSM: el control no debe contar la parada.** Mientras un PARE
+        tiene al robot detenido, la señal tapa la línea; si el control siguiera
+        acumulando "línea perdida" durante esos 3 s, al reanudar saldría en
+        recuperación —girando— en vez de continuar recto sobre la pista. Por eso
+        el veto avisa al control con ``sostener``.
         """
+        if movimiento.veredicto is PermisoMovimiento.NO_AUTORIZADO:
+            self._control.sostener()
         if resultado.posicion is None or resultado.decision_control is None:
             return componer(
                 resultado.decision_control

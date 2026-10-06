@@ -35,10 +35,18 @@ from src.vision.modelos import (
 __all__ = ["ControlTrayectoria"]
 
 #: Cada cuántos turnos, una vez agotada la gracia, el robot reintenta la
-#: búsqueda en vez de quedarse detenido en firme. Con 4, uno de cada cuatro
-#: turnos asoma hacia el lado memorizado (≈3 s parado y uno buscando a la
-#: cadencia de 24 fotogramas), suficiente para reubicarse sin barrer en redondo.
+#: búsqueda en vez de quedarse detenido en firme: uno de cada cuatro turnos
+#: asoma hacia el lado memorizado, suficiente para reubicarse sin barrer en
+#: redondo.
 _REINTENTOS_BUSQUEDA = 4
+
+#: Turnos de avance forzado tras salir de un STOP. La señal está **sobre la
+#: pista**: al reanudar, el robot debe seguir recto y dejar que la línea
+#: reaparezca por debajo del octágono, no girar buscándola. Sin esto, la parada
+#: dejaba el control en estado de recuperación y el robot salía girando. Cuatro
+#: turnos (≈1.6 s a la cadencia de 12 fotogramas) cubren el paso por encima de
+#: la señal.
+_TURNOS_TRAS_STOP = 4
 
 
 class ControlTrayectoria:
@@ -59,6 +67,8 @@ class ControlTrayectoria:
         #: lleva aparte de ``fotogramas_perdidos`` para no romper el congelado de
         #: la memoria (FR-020) que documenta el diagnóstico.
         self._reintento = 0
+        #: Fotogramas de avance forzado que quedan al salir de un STOP.
+        self._tras_stop = 0
         self._fotograma = 0
 
     # ------------------------------------------------------------------
@@ -87,7 +97,31 @@ class ControlTrayectoria:
         self._lateral = None
         self._seguimiento = None
         self._reintento = 0
+        self._tras_stop = 0
         self._fotograma = 0
+
+    def sostener(self) -> None:
+        """Congela el seguimiento mientras la FSM veta el movimiento (PARE).
+
+        **Por qué hace falta.** Mientras el robot está parado sobre el STOP la
+        señal tapa la línea. Si el control siguiera contando fotogramas sin verla,
+        al reanudar estaría en plena búsqueda y saldría **girando** hacia un lado
+        en vez de continuar recto: es el fallo de "después del PARE intenta
+        reubicarse". Aquí se descarta esa cuenta y se deja armado un tramo corto
+        de avance para después de la parada.
+
+        La señal SIGA no pasa por aquí: no veta el movimiento, así que el robot
+        simplemente sigue su trayectoria sin detenerse.
+        """
+        self._seguimiento = None
+        self._reintento = 0
+        self._tras_stop = _TURNOS_TRAS_STOP * max(1, self._params.fotogramas_por_orden)
+        if self._lateral is not None:
+            self._lateral = LadoConocido(
+                lado=self._lateral.lado,
+                fotograma=self._lateral.fotograma,
+                fotogramas_perdidos=0,
+            )
 
     # ------------------------------------------------------------------
     # Fotograma con línea visible
@@ -107,8 +141,10 @@ class ControlTrayectoria:
             lado = self._lateral.lado if self._lateral is not None else None
 
         # Q10: con línea visible el contador de pérdidas vuelve a cero, y con él
-        # el reintento de búsqueda: ya no hace falta.
+        # el reintento de búsqueda: ya no hace falta. También se desarma el avance
+        # posterior al STOP: la línea ya está a la vista.
         self._reintento = 0
+        self._tras_stop = 0
         self._lateral = (
             LadoConocido(lado=lado, fotograma=self._fotograma, fotogramas_perdidos=0)
             if lado is not None
@@ -173,6 +209,17 @@ class ControlTrayectoria:
         self._seguimiento = None
         self._fotograma += 1
 
+        if self._tras_stop > 0:
+            # Recién salido de un STOP: la señal estaba SOBRE la pista y puede
+            # tapar la línea. Se avanza recto y se deja que reaparezca por debajo
+            # del octágono, en vez de girar buscándola.
+            self._tras_stop -= 1
+            return DecisionControl(
+                comando=ComandoMovimiento.AVANZAR,
+                causa=CausaComando.SEGUIMIENTO,
+                lateral=self._lateral,
+            )
+
         if self._lateral is None:
             return DecisionControl(
                 comando=ComandoMovimiento.DETENER,
@@ -181,7 +228,7 @@ class ControlTrayectoria:
             )
 
         # La gracia está expresada en TURNOS (órdenes enviadas), no en fotogramas.
-        # Con una cadencia de 24 fotogramas por orden, contar fotogramas agotaría
+        # Con una cadencia de 12 fotogramas por orden, contar fotogramas agotaría
         # la búsqueda antes de mandar la primera y el robot se pararía sin llegar
         # a reubicarse: es lo que dejaba la recuperación muerta en la pista.
         paso = max(1, self._params.fotogramas_por_orden)

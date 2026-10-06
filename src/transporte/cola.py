@@ -139,9 +139,10 @@ class ColaTransporte:
     def forzar(self, comando: ComandoMovimiento) -> None:
         """Deja ``comando`` como único pendiente, aunque repita el último enviado.
 
-        **Por qué existe.** El enlace del robot recibe **una orden cada 24
-        fotogramas**: el bucle de visión llama a este método en cada turno para
-        mandar la decisión vigente, sea o no distinta de la anterior. Con
+        **Por qué existe.** El enlace del robot recibe **una orden cada
+        ``fotogramas_por_orden`` fotogramas** (12 en la pista, ≈0.4 s): el bucle
+        de visión llama a este método en cada turno para mandar la decisión
+        vigente, sea o no distinta de la anterior. Con
         ``encolar`` la deduplicación descartaría esa repetición —el robot se
         quedaría con la primera orden y se pararía—, así que aquí se encola
         siempre.

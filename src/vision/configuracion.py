@@ -138,7 +138,7 @@ TIMEOUT_TRANSPORTE_S_POR_DEFECTO = 0.20
 #: describe el caso de una orden por fotograma, que es el que fijan las pruebas
 #: de la ley de control (los contadores de la FSM y de la recuperación están en
 #: fotogramas); la pista configura la cadencia real en ``config/vision.json``
-#: (24 fotogramas ≈ 0.8 s a 30 fps). El control usa este valor para traducir sus
+#: (12 fotogramas ≈ 0.4 s a 30 fps). El control usa este valor para traducir sus
 #: contadores a tiempo real: sin él, una gracia de 5 fotogramas se agotaría antes
 #: de la primera orden y el robot se pararía sin llegar a buscar la línea.
 FOTOGRAMAS_POR_ORDEN_POR_DEFECTO = 1

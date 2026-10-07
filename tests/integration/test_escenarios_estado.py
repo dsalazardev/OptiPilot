@@ -64,9 +64,16 @@ def siga_antes_de_t(parametros_por_defecto: ParametrosConfiguracion) -> TrazaEsc
 def pare_nuevo_durante_parada(
     parametros_por_defecto: ParametrosConfiguracion,
 ) -> TrazaEscenario:
-    """Segunda señal PARE (50-70) mientras el robot ya está detenido; SIGA en 150."""
+    """Segundo PARE (86-110) ya pasada la gracia, pero con el robot aún detenido.
+
+    El cartel reaparece después de estar fuera más de ``x_rearme_cruce``
+    fotogramas; aun así **no** se convierte en ocurrencia nueva: el cruce sigue
+    vivo durante toda la parada (``sostener`` reinicia la ausencia) y la
+    reaparición se funde con él. Es el caso del robot lento que vuelve a ver el
+    mismo cartel mientras acaba de pasar por encima.
+    """
     guion = tramos_a_clases(
-        TOTAL, [(10, 26, "PARE"), (50, 70, "PARE"), (150, 170, "SIGA")]
+        TOTAL, [(10, 26, "PARE"), (86, 110, "PARE"), (150, 170, "SIGA")]
     )
     return correr_escenario(parametros_por_defecto, guion)
 
@@ -173,7 +180,7 @@ def test_pare_nuevo_no_reinicia_el_cronometro_t(
     Si el cronómetro se reiniciara, el robot quedaría detenido 3 s más y la
     duración de la parada crecería; el requisito es que T no se reinicia.
     """
-    assert pare_nuevo_durante_parada.fotogramas_de("PARE_CONFIRMADO") == [12, 52]
+    assert pare_nuevo_durante_parada.fotogramas_de("PARE_CONFIRMADO") == [12]
     # T se cumple 3,0 s después del PRIMER PARE (f12 → t 0,4 s), no del segundo.
     assert pare_nuevo_durante_parada.causas[F_T_CUMPLIDO] == "T_CUMPLIDO"
     transiciones_al_cumplir_t = [
@@ -194,13 +201,13 @@ def test_pare_nuevo_no_adelanta_la_reanudacion(
 ) -> None:
     """Un PARE nuevo durante la parada no acorta ni alarga el cronómetro."""
     guion = tramos_a_clases(
-        TOTAL, [(10, 26, "PARE"), (40, 60, "SIGA"), (70, 90, "PARE")]
+        TOTAL, [(10, 26, "PARE"), (40, 60, "SIGA"), (86, 100, "PARE")]
     )
     traza = correr_escenario(parametros_por_defecto, guion)
 
-    assert traza.fotogramas_de("PARE_CONFIRMADO") == [12, 72]
+    assert traza.fotogramas_de("PARE_CONFIRMADO") == [12]
     assert traza.fotogramas_de("SIGA_CONFIRMADO") == [42]
-    # El PARE de f72 no reinicia T: la reanudación sigue siendo a los 3 s del f12.
+    # El PARE que reaparece se funde con la ocurrencia abierta: T no se reinicia.
     assert traza.causas[F_T_CUMPLIDO] == "T_CUMPLIDO"
     _invariante_sin_autorizacion_espuria(traza)
 

@@ -114,6 +114,28 @@ class Detector:
             candidato = _candidato_de_clase(candidatos, clase)
 
             if candidato is not None:
+                # Un rearme pendiente se resuelve antes de reutilizar la
+                # ocurrencia: si la ventana ya lo permitía, el candidato que
+                # entra ahora es una señal nueva y no debe heredar el id viejo
+                # (eso la haría pasar por «ya atendida» y no volvería a parar).
+                if (
+                    permitir_rearme
+                    and rastro.ocurrencia_id is not None
+                    and rastro.sin_ver >= self._params.x_rearme
+                ):
+                    self._cerrar_ocurrencia(rastro.ocurrencia_id, indice, t_s)
+                    if clase is ClaseSenal.PARE:
+                        eventos.append(
+                            EventoSenal(
+                                tipo=TipoEvento.PARE_REARMADO,
+                                fotograma_idx=indice,
+                                t_s=t_s,
+                                clase=clase,
+                                ocurrencia_id=rastro.ocurrencia_id,
+                            )
+                        )
+                    rastro.ocurrencia_id = None
+                    rearmadas.add(clase)
                 rastro.sin_ver = 0
                 if not rastro.confirmada:
                     rastro.conteo += 1

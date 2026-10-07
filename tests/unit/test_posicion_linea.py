@@ -8,7 +8,8 @@ Grupos:
 - posición con línea centrada y descentrada a ambos lados
 - el error se mide contra ``x_objetivo``, no contra el centro fijo
 - determinismo
-- los tres casos de pérdida de confianza: ambigüedad, borde y ruido
+- pérdida de confianza: borde, ruido y umbral
+- selección entre varias líneas: la pista gruesa/continua gana a la trampa delgada
 - invariantes del contrato Q1–Q7
 - cumplimiento normativo: nada de Hough ni de ``cv2.fitLine`` (FR-003)
 """
@@ -178,12 +179,13 @@ def test_la_fraccion_de_anticipacion_descarta_el_tramo_lejano() -> None:
     assert _estimador(frac_anticipacion=0.0).aplicar(_segmentacion(lejana)).valida
 
 
-def test_un_segundo_modo_en_la_franja_lejana_hace_la_posicion_ambigua() -> None:
+def test_un_segundo_modo_en_la_franja_lejana_no_desplaza_a_la_pista() -> None:
     """Con la anticipación activa, la mancha lejana no debe contaminar la posición.
 
-    Al descartarla, la línea se lee limpia. Sin descartarla aparece un segundo
-    modo de masa comparable y el estimador **no promedia entre modos**: entrega
-    una posición inválida, que es la respuesta segura para el control.
+    Al descartarla, la línea se lee limpia. Sin descartarla hay dos candidatos y
+    el estimador **elige uno** —el de mayor grosor × continuidad, la línea
+    principal—, en vez de promediar entre modos, que inventaría una línea en
+    medio que no existe (contrato §1).
     """
     mascara = _banda(240)
     inicio_roi = int(ALTO * 0.10)
@@ -195,9 +197,9 @@ def test_un_segundo_modo_en_la_franja_lejana_hace_la_posicion_ambigua() -> None:
     sin_anticipacion = _estimador(frac_anticipacion=0.0).aplicar(_segmentacion(mascara))
     assert con_anticipacion.valida
     assert con_anticipacion.x_px == pytest.approx(240, abs=3.0)
-    # Ambiguo: dos modos parecidos, luego ninguna posición.
-    assert sin_anticipacion.valida is False
-    assert sin_anticipacion.x_px is None
+    # Dos modos visibles: se elige la línea principal; nunca el punto medio.
+    assert sin_anticipacion.valida
+    assert sin_anticipacion.x_px == pytest.approx(240, abs=3.0)
 
 
 # ---------------------------------------------------------------------------
@@ -227,19 +229,25 @@ def test_ruido_disperso_no_produce_una_posicion_valida() -> None:
     assert pos.confianza == 0.0
 
 
-def test_dos_bandas_de_masa_comparable_son_ambiguas() -> None:
-    """Dos modos de masa parecida: confianza por ambigüedad, nunca promediar modos.
+def test_dos_bandas_de_masa_comparable_se_elige_una_nunca_el_promedio() -> None:
+    """Dos modos comparables: se elige uno por puntaje, jamás su promedio.
 
-    Ambas bandas caen dentro de la banda de lectura, que es donde el estimador
-    mira; si una cayera en la franja lejana descartada, no habría ambigüedad.
+    El estimador no promedia entre modos (inventaría una línea en medio que no
+    existe); selecciona el de mayor grosor × continuidad. Como los dos pesan
+    parecido, su dominancia baja (~0.5) y un umbral de confianza alto la
+    rechaza: esa es la vía para exigir una escena sin ambigüedad.
     """
     mascara = _banda(150, ancho_banda=61)
     y_lectura = int(ALTO * 0.10) + int(ALTO * 0.45) - 200
     mascara[y_lectura : y_lectura + 100, 320:380] = 1
-    pos = _estimador(umbral_confianza=0.95).aplicar(_segmentacion(mascara))
-    assert pos.valida is False
-    assert pos.x_px is None
-    assert pos.confianza == 0.0
+    pos = _estimador().aplicar(_segmentacion(mascara))
+    assert pos.valida
+    # La posición es el centroide de uno de los dos tramos, no el punto medio.
+    assert pos.x_px == pytest.approx(150, abs=3.0)
+    # Con umbral alto, la dominancia ~0.5 no alcanza: sin ambigüedad o nada.
+    exigente = _estimador(umbral_confianza=0.95).aplicar(_segmentacion(mascara))
+    assert exigente.valida is False
+    assert exigente.x_px is None
 
 
 def test_linea_en_el_borde_de_la_roi_no_es_una_posicion_valida() -> None:
@@ -267,6 +275,91 @@ def test_umbral_de_confianza_es_efectivo() -> None:
         por_encima = _estimador(umbral_confianza=base.confianza + 0.01).aplicar(mascara)
         assert por_encima.valida is False
         assert por_encima.x_px is None
+
+
+# ---------------------------------------------------------------------------
+# Selección entre varias líneas: la pista gruesa gana a la trampa delgada
+# ---------------------------------------------------------------------------
+
+
+def _con_dos_bandas(primera: np.ndarray, segunda: np.ndarray) -> np.ndarray:
+    return primera | segunda
+
+
+def test_una_linea_trampa_delgada_no_desplaza_a_la_pista() -> None:
+    """La trampa entra en el ROI y es más delgada: la posición no cambia.
+
+    Ambas bandas son continuas y sus picos son iguales (la altura de la banda),
+    que es el caso que confundía al estimador anterior: ``argmax`` devolvía la
+    primera columna, así que una trampa delgada a la izquierda se llevaba la
+    posición. Ahora el filtro de grosor la descarta.
+    """
+    pista = _banda(300, ancho_banda=55)
+    trampa = _banda(120, ancho_banda=10)
+    pos = _estimador().aplicar(_segmentacion(_con_dos_bandas(pista, trampa)))
+    assert pos.valida
+    assert pos.x_px == pytest.approx(300, abs=3.0)
+    assert pos.ancho_banda_px >= 55
+
+
+def test_solo_una_linea_trampa_delgada_no_da_posicion() -> None:
+    """Si lo único visible es una línea más delgada que la pista, no hay dato."""
+    pos = _estimador().aplicar(_segmentacion(_banda(120, ancho_banda=10)))
+    assert pos.valida is False
+    assert pos.x_px is None
+
+
+def test_el_filtro_de_grosor_es_la_causa() -> None:
+    """Con ``grosor_minimo_rel = 0`` la misma trampa delgada sí se lee."""
+    pos = _estimador(grosor_minimo_rel=0.0).aplicar(_segmentacion(_banda(120, ancho_banda=10)))
+    assert pos.valida
+    assert pos.x_px == pytest.approx(120, abs=3.0)
+
+
+def test_sin_memoria_gana_la_mas_gruesa() -> None:
+    """Dos candidatas válidas y sin trayectoria previa: manda el grosor."""
+    mascara = _con_dos_bandas(_banda(150, ancho_banda=55), _banda(360, ancho_banda=75))
+    pos = _estimador().aplicar(_segmentacion(mascara))
+    assert pos.valida
+    assert pos.x_px == pytest.approx(360, abs=3.0)
+
+
+def test_entre_dos_validas_prefiere_la_coherente_con_la_trayectoria() -> None:
+    """Con memoria de la posición previa, no salta a una banda más gruesa lejana.
+
+    Es la regla que pide el Reto ante una línea trampa que aparece en el ROI:
+    mientras la pista siga cerca de donde estaba, se conserva la pista.
+    """
+    estimador = _estimador()
+    estimador.aplicar(_segmentacion(_banda(150, ancho_banda=55)))  # memoria en 150
+    mascara = _con_dos_bandas(_banda(150, ancho_banda=55), _banda(360, ancho_banda=75))
+    pos = estimador.aplicar(_segmentacion(mascara))
+    assert pos.valida
+    assert pos.x_px == pytest.approx(150, abs=3.0)
+
+
+def test_una_trampa_que_pasa_el_grosor_no_gana_solo_por_estar_mas_cerca() -> None:
+    """La memoria no resucita una candidata claramente peor.
+
+    La trampa de 20 px supera el filtro de grosor y está pegada a la memoria,
+    pero su puntaje es menos de la mitad del de la pista (55 px): no compite.
+    """
+    estimador = _estimador()
+    estimador.aplicar(_segmentacion(_banda(120, ancho_banda=55)))  # memoria en 120
+    mascara = _con_dos_bandas(_banda(300, ancho_banda=55), _banda(120, ancho_banda=20))
+    pos = estimador.aplicar(_segmentacion(mascara))
+    assert pos.valida
+    assert pos.x_px == pytest.approx(300, abs=3.0)
+
+
+def test_reiniciar_olvida_la_trayectoria() -> None:
+    """Entre corridas la memoria no sobrevive: vuelve a decidir el puntaje."""
+    estimador = _estimador()
+    estimador.aplicar(_segmentacion(_banda(150, ancho_banda=55)))
+    estimador.reiniciar()
+    mascara = _con_dos_bandas(_banda(150, ancho_banda=55), _banda(360, ancho_banda=75))
+    pos = estimador.aplicar(_segmentacion(mascara))
+    assert pos.x_px == pytest.approx(360, abs=3.0)
 
 
 # ---------------------------------------------------------------------------

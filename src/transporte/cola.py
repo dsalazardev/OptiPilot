@@ -140,7 +140,7 @@ class ColaTransporte:
         """Deja ``comando`` como único pendiente, aunque repita el último enviado.
 
         **Por qué existe.** El enlace del robot recibe **una orden cada
-        ``fotogramas_por_orden`` fotogramas** (12 en la pista, ≈0.4 s): el bucle
+        ``fotogramas_por_orden`` fotogramas** (6 en la pista, ≈0.2 s): el bucle
         de visión llama a este método en cada turno para mandar la decisión
         vigente, sea o no distinta de la anterior. Con
         ``encolar`` la deduplicación descartaría esa repetición —el robot se

@@ -87,9 +87,14 @@ class ControlTrayectoria:
         #: una posición inválida no entra en ``_sin_linea``: la señal está
         #: tapando la línea y hay que seguir recto, no buscar.
         self._cruce: _CruceSenal | None = None
-        #: True si ``_cruce`` acaba de armarse, para no cerrarlo en el mismo
-        #: fotograma de la confirmación (la señal apenas empieza a tapar).
-        self._cruce_nuevo = False
+        #: Fotogramas que lleva sin verse la señal del cruce activo. Se reinicia
+        #: a 0 en cuanto se ve y al final de cada fotograma vetado (el robot
+        #: parado no se está alejando del cartel).
+        self._ausencia = 0
+        #: Último fotograma en que se vio un PARE. Sostiene la «gracia larga»:
+        #: ninguna ocurrencia nueva puede volver a parar hasta que el cartel
+        #: lleve ``x_rearme_cruce`` fotogramas fuera de pantalla.
+        self._ultimo_pare_visto: int | None = None
         #: Ocurrencias ya atendidas: una misma ``ocurrencia_id`` produce una
         #: sola acción aunque la señal desaparezca y vuelva durante el cruce.
         self._ocurrencias_atendidas: set[int] = set()
@@ -117,22 +122,26 @@ class ControlTrayectoria:
             self._sostenido = False
 
             if self._cruce is not None:
-                if pos.valida and not sostenido and not self._cruce_nuevo:
-                    # La línea volvió a verse con el robot ya avanzando: la
-                    # señal quedó atrás y el cruce termina.
+                if not sostenido and (
+                    # La señal salió de pantalla y la línea está de vuelta:
+                    # seguimiento normal otra vez.
+                    (pos.valida and self._ausencia >= self._params.x_rearme)
+                    # Red de seguridad: la señal lleva tanto fuera que ya no
+                    # puede estar tapando nada; si la línea no volvió, decide
+                    # la recuperación normal.
+                    or self._ausencia >= self._params.x_rearme_cruce
+                ):
                     self._cruce = None
                 else:
-                    # Atravesando la señal (o aún detenido por el PARE): avanzar
-                    # recto. No se busca ni se gira aunque la línea no se vea.
-                    # Si la FSM veta, el compositor convierte esto en DETENER.
-                    self._cruce_nuevo = False
+                    # La señal sigue en pantalla (o el robot está detenido por
+                    # el PARE): avanzar recto aunque la línea se vea por un
+                    # lado. No se busca ni se gira: el cartel está encima.
                     self._fotograma += 1
                     return DecisionControl(
                         comando=ComandoMovimiento.AVANZAR,
                         causa=CausaComando.CRUCE_SENAL,
                         lateral=self._lateral,
                     )
-            self._cruce_nuevo = False
 
             if pos.valida:
                 return self._con_linea(pos)
@@ -148,7 +157,8 @@ class ControlTrayectoria:
         self._seguimiento = None
         self._reintento = 0
         self._cruce = None
-        self._cruce_nuevo = False
+        self._ausencia = 0
+        self._ultimo_pare_visto = None
         self._ocurrencias_atendidas.clear()
         self._sostenido = False
         self._fotograma = 0
@@ -168,23 +178,58 @@ class ControlTrayectoria:
             return False
         self._ocurrencias_atendidas.add(ocurrencia_id)
         self._cruce = _CruceSenal(clase=clase, ocurrencia_id=ocurrencia_id)
-        self._cruce_nuevo = True
+        self._ausencia = 0
         self._reintento = 0
         return True
+
+    def observar_senal(self, presentes: frozenset[ClaseSenal]) -> None:
+        """Registra qué señales se ven en este fotograma (lo llama el pipeline).
+
+        Hace dos cosas que ``decidir`` no puede hacer por sí solo, porque no
+        recibe las señales:
+
+        - El **cruce solo termina cuando su señal deja de verse** (más la línea
+          de vuelta): mientras el cartel esté en pantalla el robot sigue recto,
+          aunque la línea asome por un lado. Sin esto el cruce moría al primer
+          trozo de línea y el robot se ponía a buscar encima de la señal.
+        - Tras un **PARE**, ninguna ocurrencia nueva puede volver a detener al
+          robot hasta que el cartel lleve ``x_rearme_cruce`` fotogramas fuera de
+          pantalla: el mismo PARE no se procesa dos veces por lento que vaya el
+          robot, y solo se vuelve a aceptar si de verdad se perdió de vista.
+        """
+        if ClaseSenal.PARE in presentes:
+            self._ultimo_pare_visto = self._fotograma
+        if self._cruce is None:
+            return
+        self._ausencia = 0 if self._cruce.clase in presentes else self._ausencia + 1
 
     @property
     def cruce_activo(self) -> bool:
         """¿El robot está atravesando una señal confirmada?"""
         return self._cruce is not None
 
+    @property
+    def rearme_bloqueado(self) -> bool:
+        """¿Debe el detector abstenerse de cerrar ocurrencias (rearmar)?
+
+        Se bloquea mientras hay cruce y, tras un PARE visto, hasta que pase la
+        gracia larga ``x_rearme_cruce``. Es lo que impide que el mismo cartel
+        genere una ocurrencia nueva y vuelva a parar al robot.
+        """
+        if self._cruce is not None:
+            return True
+        if self._ultimo_pare_visto is None:
+            return False
+        return (self._fotograma - self._ultimo_pare_visto) < self._params.x_rearme_cruce
+
     def sostener(self) -> None:
         """Marca que la FSM tiene el movimiento vetado en este fotograma (PARE).
 
         **Por qué hace falta.** Mientras el robot está parado en el STOP la señal
-        tapa la línea. El cruce debe sobrevivir a toda la parada y cerrarse solo
-        cuando la línea vuelva a verse con el robot ya avanzando; si no, el
-        primer fotograma sin línea después del STOP entraría en recuperación y el
-        robot saldría girando en vez de seguir recto.
+        tapa la línea. El cruce debe sobrevivir a toda la parada y la cuenta de
+        ausencia se reinicia: el robot detenido no se está alejando del cartel,
+        así que al reanudar empieza a contar de cero y el avance recto dura al
+        menos la ventana completa.
 
         La señal SIGA no pasa por aquí: no veta el movimiento, así que el cruce
         avanza sin detenerse.
@@ -192,6 +237,7 @@ class ControlTrayectoria:
         self._sostenido = True
         self._seguimiento = None
         self._reintento = 0
+        self._ausencia = 0
         if self._lateral is not None:
             self._lateral = LadoConocido(
                 lado=self._lateral.lado,

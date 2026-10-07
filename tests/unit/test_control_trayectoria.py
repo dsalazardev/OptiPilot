@@ -44,6 +44,11 @@ ANCHO = 478
 UMBRAL_BAJO = ZONA - HIST  # 0.07 -> por debajo, AVANZAR
 UMBRAL_ALTO = ZONA + HIST  # 0.13 -> por encima, corrección
 
+#: ``x_rearme`` por defecto (fotogramas sin ver la señal antes de rearmar) y la
+#: gracia larga del cruce, en tamaños cortos para los tests.
+SIN_VER = 5
+AUSENCIA_LARGA = 12
+
 
 def _control(**kw: object) -> ControlTrayectoria:
     valores: dict[str, object] = {
@@ -51,6 +56,7 @@ def _control(**kw: object) -> ControlTrayectoria:
         "zona_muerta": ZONA,
         "histeresis": HIST,
         "n_gracia_busqueda": GRACIA,
+        "x_rearme_cruce": AUSENCIA_LARGA,
     }
     valores.update(kw)
     return ControlTrayectoria(ParametrosConfiguracion(**valores))  # type: ignore[arg-type]
@@ -437,11 +443,11 @@ def test_una_ocurrencia_solo_arma_el_cruce_una_vez() -> None:
 
 
 def test_en_cruce_la_linea_tapada_avanza_recto_sin_buscar() -> None:
-    """Sin tope de fotogramas: la señal tapa la línea hasta que el robot pasa.
+    """Mientras el cartel está encima no hay tope de fotogramas ni búsqueda.
 
-    No se usa una cantidad fija de frames ni de turnos: el cruce dura lo que
-    tarde la línea en volver a verse, y durante todo ese tiempo el comando es
-    ``AVANZAR`` conservando la última lateral conocida, no una búsqueda.
+    Sin llamar a ``observar_senal`` la señal se considera siempre presente: el
+    cruce sigue y el comando es ``AVANZAR`` conservando la última lateral, nunca
+    una recuperación.
     """
     control = _control()
     control.decidir(_pos(0.30))  # memoria: DERECHA
@@ -463,41 +469,89 @@ def test_en_cruce_no_existen_recuperacion_ni_gracia_agotada() -> None:
     assert causas == {CausaComando.CRUCE_SENAL}
 
 
-def test_el_fotograma_de_la_confirmacion_no_cierra_el_cruce() -> None:
-    """La línea puede verse justo al confirmar; el cruce no muere ahí."""
+def test_mientras_la_senal_se_ve_el_cruce_no_termina_aunque_haya_linea() -> None:
+    """El cruce no muere al ver la línea: el cartel sigue en pantalla.
+
+    Es el caso del PARE/SIGA que el robot lento tarda en atravesar: la línea
+    asoma por un lado, pero si se volviera al seguimiento el cartel taparía la
+    pista otra vez y el robot se pondría a girar encima de la señal.
+    """
     control = _control()
     control.iniciar_cruce(ClaseSenal.SIGA, 0)
-    d = control.decidir(_pos(0.30))
-    assert d.causa is CausaComando.CRUCE_SENAL
+    for _ in range(200):
+        control.observar_senal(frozenset({ClaseSenal.SIGA}))
+        d = control.decidir(_pos(0.30))  # línea perfectamente visible
+        assert d.comando is ComandoMovimiento.AVANZAR
+        assert d.causa is CausaComando.CRUCE_SENAL
     assert control.cruce_activo is True
 
 
-def test_el_cruce_termina_cuando_la_linea_reaparece() -> None:
-    """Primera línea válida tras el cruce: vuelve el seguimiento normal."""
+def test_el_cruce_termina_cuando_la_senal_sale_de_pantalla() -> None:
+    """Cartel fuera (``x_rearme``) y línea de vuelta: seguimiento normal."""
     control = _control()
-    control.decidir(_pos(0.30))
     control.iniciar_cruce(ClaseSenal.SIGA, 0)
-    control.decidir(_perdida())  # fotograma de confirmación
-    assert control.cruce_activo is True
+    control.decidir(_perdida())
+    for _ in range(SIN_VER):
+        control.observar_senal(frozenset())
     d = control.decidir(_pos(0.30))
     assert control.cruce_activo is False
     assert d.comando is ComandoMovimiento.DERECHA
     assert d.causa is CausaComando.CORRECCION_DERECHA
 
 
+def test_sin_linea_y_sin_senal_el_cruce_se_corta_por_la_gracia_larga() -> None:
+    """Red de seguridad: si la pista no vuelve, el cruce no empuja sin fin."""
+    control = _control()
+    control.iniciar_cruce(ClaseSenal.SIGA, 0)
+    for _ in range(AUSENCIA_LARGA):
+        control.observar_senal(frozenset())
+        d = control.decidir(_perdida())
+    assert control.cruce_activo is False
+    assert d.causa is CausaComando.PERDIDA_SIN_MEMORIA
+
+
 def test_el_cruce_sobrevive_a_la_parada_del_pare() -> None:
-    """El veto renueva el aviso: el cruce no se cierra durante los 3 s."""
+    """El veto renueva el aviso y reinicia la ausencia durante los 3 s."""
     control = _control()
     control.iniciar_cruce(ClaseSenal.PARE, 0)
     for _ in range(90):  # 3 s a 30 fps
         assert control.decidir(_pos(0.30)).causa is CausaComando.CRUCE_SENAL
+        control.observar_senal(frozenset())  # el cartel ni siquiera se ve
         control.sostener()  # el compositor avisa en cada fotograma vetado
     # Primer fotograma tras T: aún sostenido, sigue el avance del cruce.
     assert control.decidir(_pos(0.30)).causa is CausaComando.CRUCE_SENAL
-    # Al siguiente, sin veto y con línea a la vista, manda el seguimiento.
+    # Sin cartel y con línea a la vista, el cruce termina y manda el seguimiento.
+    for _ in range(SIN_VER):
+        control.observar_senal(frozenset())
     d = control.decidir(_pos(0.30))
     assert d.causa is CausaComando.CORRECCION_DERECHA
     assert control.cruce_activo is False
+
+
+def test_tras_un_pare_la_gracia_larga_sobrevive_al_fin_del_cruce() -> None:
+    """Cerrado el cruce, el PARE sigue bloqueado hasta perderlo de vista."""
+    control = _control()
+    control.iniciar_cruce(ClaseSenal.PARE, 0)
+    control.observar_senal(frozenset({ClaseSenal.PARE}))
+    for _ in range(SIN_VER):
+        control.observar_senal(frozenset())
+        control.decidir(_pos(0.30))
+    assert control.cruce_activo is False  # la línea volvió
+    assert control.rearme_bloqueado is True  # pero el PARE sigue recordado
+    for _ in range(AUSENCIA_LARGA):
+        control.observar_senal(frozenset())
+        control.decidir(_pos(0.30))
+    assert control.rearme_bloqueado is False
+
+
+def test_un_pare_que_no_se_pierde_de_vista_nunca_desbloquea_el_rearme() -> None:
+    """Mientras el cartel se vea (aunque parpadee) no se acepta otro PARE."""
+    control = _control()
+    control.iniciar_cruce(ClaseSenal.PARE, 0)
+    for _ in range(300):
+        control.observar_senal(frozenset({ClaseSenal.PARE}))
+        control.decidir(_perdida())
+        assert control.rearme_bloqueado is True
 
 
 def test_una_ocurrencia_ya_atendida_no_rearma_el_cruce() -> None:
@@ -505,7 +559,9 @@ def test_una_ocurrencia_ya_atendida_no_rearma_el_cruce() -> None:
     control = _control()
     control.iniciar_cruce(ClaseSenal.PARE, 3)
     control.decidir(_perdida())
-    control.decidir(_pos(0.0))  # línea de nuevo: cruce cerrado
+    for _ in range(SIN_VER):
+        control.observar_senal(frozenset())
+    control.decidir(_pos(0.0))  # cartel fuera y línea de nuevo: cruce cerrado
     assert control.cruce_activo is False
     assert control.iniciar_cruce(ClaseSenal.PARE, 3) is False
     d = control.decidir(_perdida())
@@ -517,6 +573,8 @@ def test_una_ocurrencia_nueva_si_arma_un_cruce_nuevo() -> None:
     control = _control()
     control.iniciar_cruce(ClaseSenal.PARE, 1)
     control.decidir(_perdida())
+    for _ in range(SIN_VER):
+        control.observar_senal(frozenset())
     control.decidir(_pos(0.0))
     assert control.iniciar_cruce(ClaseSenal.PARE, 2) is True
     assert control.decidir(_perdida()).causa is CausaComando.CRUCE_SENAL
@@ -526,6 +584,8 @@ def test_reiniciar_olvida_el_cruce_y_las_ocurrencias_atendidas() -> None:
     """Entre corridas no sobrevive ni el cruce ni su histórico de ocurrencias."""
     control = _control()
     control.iniciar_cruce(ClaseSenal.PARE, 0)
+    control.observar_senal(frozenset({ClaseSenal.PARE}))
     control.reiniciar()
     assert control.cruce_activo is False
+    assert control.rearme_bloqueado is False
     assert control.iniciar_cruce(ClaseSenal.PARE, 0) is True

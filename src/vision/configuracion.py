@@ -115,6 +115,28 @@ FRAC_ANTICIPACION_POR_DEFECTO = 0.40
 FRAC_PICO_POR_DEFECTO = 0.50
 # Confianza mínima para que una posición se considere válida (FR-006).
 UMBRAL_CONFIANZA_POR_DEFECTO = 0.35
+# Grosor mínimo (fracción del ancho del fotograma) para que un tramo de la
+# máscara sea candidato a pista guía. Medido sobre el footage archivado (478 de
+# ancho): la guía mide 53–104 px (0.11–0.22) y la máscara sintética 25 px sobre
+# 640 (0.039); 0.03 no descarta la pista de esos vídeos y sí los fragmentos de
+# 5–31 px y las trampas claramente más delgadas. **En la cámara viva la línea
+# puede leerse más delgada**: si el filtro absoluto rechaza la pista, el control
+# entra en recuperación y el robot se para a ratos. Por eso el valor de pista
+# (``config/vision.json``) se calibra con una captura real y, mientras tanto,
+# está a 0.0: sin umbral absoluto decide la competición relativa (puntaje ≥ la
+# mitad del mejor) y la coherencia de trayectoria.
+GROSOR_MINIMO_REL_POR_DEFECTO = 0.03
+# Salto máximo (fracción del ancho del fotograma) entre la posición actual de un
+# candidato y la anterior para considerarlo «la misma pista». La posición real
+# varía ~50 px/fotograma sobre 478 (0.10 del ancho); 0.20 da margen a la curva
+# sin aceptar como coherente una línea que aparezca lejos.
+SALTO_MAXIMO_REL_POR_DEFECTO = 0.20
+# Fotogramas que una señal PARE debe llevar SIN verse, después de su cruce,
+# antes de aceptar otra ocurrencia que vuelva a detener al robot. Es la «gracia
+# larga» del cartel: con el robot lento el PARE sigue en pantalla mientras se
+# pasa por encima, desaparece y vuelve a aparecer; sin esta ventana el mismo
+# cartel pararía al robot varias veces. Con 60 fotogramas ≈ 2 s a 30 fps.
+X_REARME_CRUCE_POR_DEFECTO = 60
 # Umbral de error bajo el cual el robot avanza recto. Medido: 40–82 % de los
 # fotogramas de rutaIdeal caen dentro con 0.10.
 ZONA_MUERTA_POR_DEFECTO = 0.10
@@ -138,7 +160,7 @@ TIMEOUT_TRANSPORTE_S_POR_DEFECTO = 0.20
 #: describe el caso de una orden por fotograma, que es el que fijan las pruebas
 #: de la ley de control (los contadores de la FSM y de la recuperación están en
 #: fotogramas); la pista configura la cadencia real en ``config/vision.json``
-#: (12 fotogramas ≈ 0.4 s a 30 fps). El control usa este valor para traducir sus
+#: (6 fotogramas ≈ 0.2 s a 30 fps). El control usa este valor para traducir sus
 #: contadores a tiempo real: sin él, una gracia de 5 fotogramas se agotaría antes
 #: de la primera orden y el robot se pararía sin llegar a buscar la línea.
 FOTOGRAMAS_POR_ORDEN_POR_DEFECTO = 1
@@ -178,6 +200,9 @@ _CAMPOS_CONOCIDOS = frozenset(
         "frac_anticipacion",
         "frac_pico",
         "umbral_confianza",
+        "grosor_minimo_rel",
+        "salto_maximo_rel",
+        "x_rearme_cruce",
         "zona_muerta",
         "histeresis",
         "n_gracia_busqueda",
@@ -211,11 +236,14 @@ class ParametrosConfiguracion:
     aspecto_min: float = ASPECTO_MIN_POR_DEFECTO
     aspecto_max: float = ASPECTO_MAX_POR_DEFECTO
     # Control de trayectoria (specs/002). Los 17 campos anteriores son de 001 y
-    # no se tocan; estos 10 son nuevos y los valida su propio bloque.
+    # no se tocan; estos campos son nuevos y los valida su propio bloque.
     x_objetivo: float = X_OBJETIVO_POR_DEFECTO
     frac_anticipacion: float = FRAC_ANTICIPACION_POR_DEFECTO
     frac_pico: float = FRAC_PICO_POR_DEFECTO
     umbral_confianza: float = UMBRAL_CONFIANZA_POR_DEFECTO
+    grosor_minimo_rel: float = GROSOR_MINIMO_REL_POR_DEFECTO
+    salto_maximo_rel: float = SALTO_MAXIMO_REL_POR_DEFECTO
+    x_rearme_cruce: int = X_REARME_CRUCE_POR_DEFECTO
     zona_muerta: float = ZONA_MUERTA_POR_DEFECTO
     histeresis: float = HISTERESIS_POR_DEFECTO
     n_gracia_busqueda: int = N_GRACIA_BUSQUEDA_POR_DEFECTO
@@ -311,6 +339,27 @@ def _validar_control(p: ParametrosConfiguracion) -> None:
         )
     if not 0.0 <= p.umbral_confianza <= 1.0:
         raise ConfiguracionInvalidaError("umbral_confianza", "debe estar en [0, 1]")
+    # V7: 0 desactiva el filtro de grosor; 1.0 descartaría cualquier línea
+    # (ningún tramo puede ocupar el fotograma entero).
+    if not 0.0 <= p.grosor_minimo_rel < 1.0:
+        raise ConfiguracionInvalidaError(
+            "grosor_minimo_rel",
+            "debe estar en [0, 1) como fracción del ancho del fotograma "
+            "(0 desactiva el filtro de grosor)",
+        )
+    # V8: con 0 ningún candidato sería coherente y la memoria de trayectoria
+    # quedaría sin efecto.
+    if p.salto_maximo_rel <= 0.0:
+        raise ConfiguracionInvalidaError(
+            "salto_maximo_rel",
+            "debe ser > 0 como fracción del ancho del fotograma",
+        )
+    # V9: 0 desactiva la gracia larga (el mismo cartel podría volver a parar).
+    if p.x_rearme_cruce < 0:
+        raise ConfiguracionInvalidaError(
+            "x_rearme_cruce",
+            "debe ser >= 0 (0 desactiva la gracia tras el cruce)",
+        )
     if not 0.0 <= p.zona_muerta <= 1.0:
         raise ConfiguracionInvalidaError("zona_muerta", "debe estar en [0, 1]")
     if p.histeresis < 0.0:
@@ -531,6 +580,15 @@ def _fusionar(datos: Mapping[str, Any]) -> ParametrosConfiguracion:
         frac_anticipacion=_leer_numero(datos, "frac_anticipacion", defecto.frac_anticipacion),
         frac_pico=_leer_numero(datos, "frac_pico", defecto.frac_pico),
         umbral_confianza=_leer_numero(datos, "umbral_confianza", defecto.umbral_confianza),
+        grosor_minimo_rel=_leer_numero(
+            datos, "grosor_minimo_rel", defecto.grosor_minimo_rel
+        ),
+        salto_maximo_rel=_leer_numero(
+            datos, "salto_maximo_rel", defecto.salto_maximo_rel
+        ),
+        x_rearme_cruce=_leer_entero(
+            datos, "x_rearme_cruce", defecto.x_rearme_cruce
+        ),
         zona_muerta=_leer_numero(datos, "zona_muerta", defecto.zona_muerta),
         histeresis=_leer_numero(datos, "histeresis", defecto.histeresis),
         n_gracia_busqueda=_leer_entero(

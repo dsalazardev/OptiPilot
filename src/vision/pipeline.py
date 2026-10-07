@@ -128,7 +128,7 @@ class PipelineVision:
             candidatos,
             indice,
             t_s,
-            permitir_rearme=not self._control.cruce_activo,
+            permitir_rearme=not self._control.rearme_bloqueado,
         )
         visibilidad = self._marcar_visibilidad(candidatos, segmentacion.roi_senales, indice, t_s)
         for clase in deteccion.clases_rearmadas:
@@ -142,6 +142,10 @@ class PipelineVision:
         for senal in deteccion.senales_confirmadas:
             if not self._control.iniciar_cruce(senal.clase, senal.ocurrencia_id):
                 eventos = _sin_confirmacion_atendida(eventos, senal.ocurrencia_id)
+        # El control necesita saber qué señales siguen en pantalla: el cruce no
+        # termina mientras su cartel se vea (aunque la línea asome), y tras un
+        # PARE la gracia larga cuenta desde la última vez que se vio.
+        self._control.observar_senal(deteccion.presentes)
 
         # Etapas de control: posición lateral → propuesta del control. El
         # estimador tolera máscaras vacías devolviendo una posición inválida
@@ -204,8 +208,13 @@ class PipelineVision:
         return componer(resultado.decision_control, movimiento, resultado.posicion)
 
     def reiniciar_control(self) -> None:
-        """Reinicia la memoria del control entre corridas (FR-023)."""
+        """Reinicia las memorias entre corridas (FR-023).
+
+        Incluye la del estimador (última posición válida, usada para la
+        coherencia de trayectoria): entre corridas no debe sobrevivir.
+        """
         self._control.reiniciar()
+        self._estimador.reiniciar()
 
     def _marcar_visibilidad(
         self,

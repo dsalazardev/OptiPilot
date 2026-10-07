@@ -24,11 +24,14 @@
   "frac_anticipacion": 0.40,
   "frac_pico": 0.50,
   "umbral_confianza": 0.35,
+  "grosor_minimo_rel": 0.0,
+  "salto_maximo_rel": 0.20,
+  "x_rearme_cruce": 60,
   "zona_muerta": 0.10,
   "histeresis": 0.03,
   "n_gracia_busqueda": 5,
   "mac_bluetooth": "00:1B:10:21:2C:1B",
   "timeout_transporte_s": 0.20,
-  "fotogramas_por_orden": 12,
+  "fotogramas_por_orden": 6,
   "invertir_lados": false
 }

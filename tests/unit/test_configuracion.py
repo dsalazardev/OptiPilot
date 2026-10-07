@@ -112,6 +112,10 @@ CASOS_INVALIDOS = [
     ({"tolerancia_vertices": -1}, "tolerancia_vertices"),
     ({"aspecto_min": 0.0}, "aspecto_min"),
     ({"aspecto_min": 1.5, "aspecto_max": 1.4}, "aspecto_min"),
+    ({"grosor_minimo_rel": -0.01}, "grosor_minimo_rel"),
+    ({"grosor_minimo_rel": 1.0}, "grosor_minimo_rel"),
+    ({"salto_maximo_rel": 0.0}, "salto_maximo_rel"),
+    ({"salto_maximo_rel": -0.2}, "salto_maximo_rel"),
     ({"roi_linea": {"x": 0.9, "w": 0.2}}, "roi_linea"),
     ({"roi_senales": {"y": -0.1}}, "roi_senales"),
     ({"roi_linea": {"w": 0.0}}, "roi_linea"),
@@ -150,6 +154,8 @@ PARAMETROS_CONTROL = [
     ("frac_anticipacion", 0.40),
     ("frac_pico", 0.50),
     ("umbral_confianza", 0.35),
+    ("salto_maximo_rel", 0.20),
+    ("x_rearme_cruce", 60),
     ("zona_muerta", 0.10),
     ("histeresis", 0.03),
     ("n_gracia_busqueda", 5),
@@ -159,17 +165,20 @@ PARAMETROS_CONTROL = [
 
 
 @pytest.mark.parametrize("campo,esperado", PARAMETROS_CONTROL)
-def test_control_tiene_los_diez_parametros_con_su_default(campo: str, esperado: object) -> None:
+def test_control_tiene_los_parametros_con_su_default(campo: str, esperado: object) -> None:
     assert getattr(ParametrosConfiguracion.por_defecto(), campo) == esperado
 
 
-def test_los_diez_parametros_de_control_estan_en_config_vision_json() -> None:
+def test_los_parametros_de_control_estan_en_config_vision_json() -> None:
     """El JSON versionado y los defaults del código deben coincidir (T006).
 
-    La MAC de Bluetooth queda fuera de la comparación: es un valor por robot que
-    el equipo edita para cada mBot (``config/vision.json``), no un default que
-    deba coincidir con el código. Su formato sí se valida (regla V5 de
-    ``configuracion.py``).
+    Quedan fuera de la comparación los valores que se ajustan por robot o por
+    pista, no por defecto: la MAC de Bluetooth (cada mBot) y
+    ``grosor_minimo_rel`` (depende de cuántos píxeles mida la línea en la cámara
+    y altura de montaje; 0.0 en la pista desactiva el filtro absoluto mientras
+    se calibra con una captura real). El formato de la MAC sí se valida (regla
+    V5 de ``configuracion.py``) y el rango de ``grosor_minimo_rel`` también
+    (V7).
     """
     parametros = cargar_parametros("config/vision.json")
     for campo, esperado in PARAMETROS_CONTROL:

@@ -12,6 +12,7 @@ pase con el control de trayectoria.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from src.transporte.cola import ColaTransporte
@@ -21,10 +22,24 @@ from src.vision.maquina_estados import MaquinaEstados
 from src.vision.modelos import (
     CausaComando,
     ComandoMovimiento,
+    EstadoRobot,
     PermisoMovimiento,
+    TipoEvento,
 )
 from src.vision.pipeline import PipelineVision
-from tests.integration._escenarios import X_LINEA, fotograma_con
+from tests.fixtures.generador_sintetico import (
+    color_por_clase,
+    crear_fondo,
+    dibujar_octagono,
+)
+from tests.integration._escenarios import (
+    ALTO,
+    ANCHO,
+    POSICIONES_SENAL,
+    RADIO_SENAL,
+    X_LINEA,
+    fotograma_con,
+)
 
 
 class Corrida:
@@ -35,6 +50,8 @@ class Corrida:
         self.comandos_finales: list[ComandoMovimiento] = []
         self.causas_finales: list[CausaComando] = []
         self.veredictos: list[PermisoMovimiento] = []
+        self.estados: list[EstadoRobot] = []
+        self.eventos: list = []
 
 
 def _correr(frames, params: ParametrosConfiguracion) -> tuple[Corrida, TransporteSimulado]:
@@ -56,6 +73,8 @@ def _correr(frames, params: ParametrosConfiguracion) -> tuple[Corrida, Transport
         corrida.comandos_finales.append(decision.comando)
         corrida.causas_finales.append(decision.causa)
         corrida.veredictos.append(estado.decision.veredicto)
+        corrida.estados.append(estado.estado)
+        corrida.eventos.extend(resultado.eventos)
 
         cola.encolar(decision.comando)
         cola.drenar(transporte)  # en el test el drenaje es síncrono
@@ -152,3 +171,104 @@ def test_la_corrida_no_drena_dentro_del_bucle() -> None:
         cola.encolar(decision.comando)
     assert cola.pendientes() > 0  # nada se drenó: está pendiente
     assert cola.ultimo_enviado() is None
+
+
+# ---------------------------------------------------------------------------
+# Feature 003 — cruce de señal: PARE/SIGA sobre la pista tapan la línea
+# ---------------------------------------------------------------------------
+
+
+def _fotograma_con_senal_sin_linea(clase: str) -> np.ndarray:
+    """La señal está sobre la pista y tapa la línea: solo se ve el octágono.
+
+    No se dibuja la línea a propósito: es exactamente lo que ve el estimador
+    cuando el robot llega a la señal, y lo que antes se confundía con una
+    pérdida de pista.
+    """
+    imagen = crear_fondo(ALTO, ANCHO)
+    dibujar_octagono(imagen, POSICIONES_SENAL[clase], RADIO_SENAL, color_por_clase(clase))
+    return imagen
+
+
+def test_el_cruce_de_siga_no_dispara_busqueda_lateral(params: ParametrosConfiguracion) -> None:
+    """SIGA tapando la línea: avance recto, sin búsqueda y sin parada."""
+    frames = (
+        [fotograma_con([], x_linea=X_LINEA)] * 30
+        + [_fotograma_con_senal_sin_linea("SIGA")] * 60
+        + [fotograma_con([], x_linea=X_LINEA)] * 30
+    )
+    corrida, _ = _correr(frames, params)
+    # El SIGA confirma al tercer fotograma (índice 32); desde ahí y hasta que
+    # reaparece la línea el único comando es el avance del cruce.
+    en_cruce = range(32, 90)
+    assert {corrida.causas_finales[i] for i in en_cruce} == {CausaComando.CRUCE_SENAL}
+    assert all(corrida.comandos_finales[i] is ComandoMovimiento.AVANZAR for i in en_cruce)
+    assert CausaComando.RECUPERACION not in corrida.causas_finales
+    assert CausaComando.GRACIA_AGOTADA not in corrida.causas_finales
+    assert PermisoMovimiento.NO_AUTORIZADO not in corrida.veredictos
+
+
+def test_el_cruce_del_pare_detiene_tres_segundos_y_sigue_recto(
+    params: ParametrosConfiguracion,
+) -> None:
+    """PARE tapando la línea: 3 s de parada y salida recta, sin búsqueda."""
+    frames = (
+        [fotograma_con([], x_linea=X_LINEA)] * 30
+        + [_fotograma_con_senal_sin_linea("PARE")] * 90
+        + [fotograma_con([], x_linea=X_LINEA)] * 60
+    )
+    corrida, _ = _correr(frames, params)
+    vetados = [
+        i
+        for i, veredicto in enumerate(corrida.veredictos)
+        if veredicto is PermisoMovimiento.NO_AUTORIZADO
+    ]
+    assert vetados, "el PARE debe vetar el movimiento"
+    assert all(corrida.comandos_finales[i] is ComandoMovimiento.DETENER for i in vetados)
+    assert all(corrida.causas_finales[i] is CausaComando.VETO_FSM for i in vetados)
+    # La parada cubre T completo (90 fotogramas a 30 fps), con ±1 por el
+    # redondeo de índice a tiempo.
+    assert abs(len(vetados) - int(params.t_parada_s * params.fps_objetivo)) <= 1
+    assert CausaComando.GRACIA_AGOTADA not in corrida.causas_finales
+    assert CausaComando.RECUPERACION not in corrida.causas_finales
+    # El primer fotograma autorizado tras el veto sigue en el cruce: recto.
+    assert corrida.comandos_finales[vetados[-1] + 1] is ComandoMovimiento.AVANZAR
+    assert corrida.causas_finales[vetados[-1] + 1] is CausaComando.CRUCE_SENAL
+
+
+def test_el_mismo_pare_no_vuelve_a_detenerse_mientras_se_cruza(
+    params: ParametrosConfiguracion,
+) -> None:
+    """Un PARE que parpadea durante el cruce no genera un segundo alto.
+
+    Secuencia: la señal aparece (confirma y detiene), se oculta más de
+    ``x_rearme`` fotogramas mientras el robot sigue sobre ella, y vuelve a
+    aparecer cuando el cronómetro ya se cumplió. Si el rearme no estuviera
+    bloqueado, la reaparición sería una ocurrencia nueva y el robot volvería a
+    detenerse 3 s sobre la misma señal.
+    """
+    frames = (
+        [fotograma_con([], x_linea=X_LINEA)] * 30           # 0-29: línea
+        + [_fotograma_con_senal_sin_linea("PARE")] * 20     # 30-49: confirma
+        + [crear_fondo(ALTO, ANCHO)] * 80                   # 50-129: ni línea ni señal
+        + [_fotograma_con_senal_sin_linea("PARE")] * 40     # 130-169: la misma señal vuelve
+        + [fotograma_con([], x_linea=X_LINEA)] * 40         # 170-209: línea de nuevo
+    )
+    corrida, _ = _correr(frames, params)
+    # Solo la primera confirmación llega al sistema: la reaparición se filtra.
+    confirmaciones = [e for e in corrida.eventos if e.tipo is TipoEvento.PARE_CONFIRMADO]
+    assert len(confirmaciones) == 1
+    # Un solo intervalo de veto: el PARE no vuelve a detener al robot.
+    entradas = [
+        i
+        for i, veredicto in enumerate(corrida.veredictos)
+        if veredicto is PermisoMovimiento.NO_AUTORIZADO
+        and (i == 0 or corrida.veredictos[i - 1] is PermisoMovimiento.AUTORIZADO)
+    ]
+    assert len(entradas) == 1
+    # Tras la parada, con la señal delante, avanza recto: no busca ni gira.
+    assert CausaComando.GRACIA_AGOTADA not in corrida.causas_finales
+    assert CausaComando.RECUPERACION not in corrida.causas_finales
+    assert all(
+        corrida.comandos_finales[i] is ComandoMovimiento.AVANZAR for i in range(135, 170)
+    )

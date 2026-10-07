@@ -37,13 +37,20 @@ def _tipos(eventos) -> list[TipoEvento]:
     return [e.tipo for e in eventos]
 
 
-def _avanzar(detector: Detector, fotogramas, inicio: int = 0):
+def _avanzar(
+    detector: Detector,
+    fotogramas,
+    inicio: int = 0,
+    permitir_rearme: bool = True,
+):
     """Alimenta el detector con una secuencia de listas de candidatos."""
     eventos = []
     presentes = []
     for desplazamiento, candidatos in enumerate(fotogramas):
         indice = inicio + desplazamiento
-        resultado = detector.actualizar(candidatos, indice, indice * 0.033)
+        resultado = detector.actualizar(
+            candidatos, indice, indice * 0.033, permitir_rearme=permitir_rearme
+        )
         eventos.extend(resultado.eventos)
         presentes.append(resultado.presentes)
     return eventos, presentes
@@ -154,6 +161,46 @@ def test_rearmado_a_los_cinco_fotogramas_y_nueva_ocurrencia(parametros_por_defec
     confirmaciones = [e for e in eventos if e.tipo is TipoEvento.PARE_CONFIRMADO]
     assert [e.ocurrencia_id for e in confirmaciones] == [0, 1]
     assert detector.ocurrencias[1].estado is EstadoOcurrencia.ACTIVA
+
+
+# ---------------------------------------------------------------------------
+# Feature 003 — rearme bloqueado mientras el robot cruza la señal
+# ---------------------------------------------------------------------------
+
+
+def test_sin_rearme_la_ocurrencia_no_se_cierra(parametros_por_defecto) -> None:
+    """Con ``permitir_rearme=False`` la señal puede ocultarse sin re-armarse."""
+    detector = Detector(parametros_por_defecto)
+    _avanzar(detector, [[_candidato(ClaseSenal.PARE)]] * 3)
+    eventos, _ = _avanzar(detector, [[]] * 10, inicio=3, permitir_rearme=False)
+    assert TipoEvento.PARE_REARMADO not in _tipos(eventos)
+    assert detector.ocurrencias[0].estado is EstadoOcurrencia.ACTIVA
+    # Al terminar el cruce se permite el rearme y la ocurrencia se cierra.
+    eventos, _ = _avanzar(detector, [[]], inicio=13, permitir_rearme=True)
+    assert _tipos(eventos).count(TipoEvento.PARE_REARMADO) == 1
+    assert detector.ocurrencias[0].estado is EstadoOcurrencia.CERRADA
+
+
+def test_la_misma_senal_reaparecida_conserva_su_ocurrencia(parametros_por_defecto) -> None:
+    """Con el rearme bloqueado, un parpadeo no fragmenta la ocurrencia.
+
+    La re-confirmación se emite con el **mismo** ``ocurrencia_id``: es la misma
+    señal física, no una nueva. El pipeline es quien la descarta aguas arriba
+    para que no vuelva a detener al robot.
+    """
+    detector = Detector(parametros_por_defecto)
+    _avanzar(detector, [[_candidato(ClaseSenal.PARE)]] * 3)
+    _avanzar(detector, [[]] * 8, inicio=3, permitir_rearme=False)
+    eventos, presentes = _avanzar(
+        detector,
+        [[_candidato(ClaseSenal.PARE)]] * 3,
+        inicio=11,
+        permitir_rearme=False,
+    )
+    confirmaciones = [e for e in eventos if e.tipo is TipoEvento.PARE_CONFIRMADO]
+    assert [e.ocurrencia_id for e in confirmaciones] == [0]
+    assert len(detector.ocurrencias) == 1
+    assert presentes[-1] == {ClaseSenal.PARE}
 
 
 # ---------------------------------------------------------------------------

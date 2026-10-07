@@ -37,10 +37,13 @@ from .modelos import (
     DecisionCompuesta,
     DecisionControl,
     DecisionMovimiento,
+    EventoSenal,
     MarcadorVisibilidadPlena,
     PermisoMovimiento,
     PosicionLinea,
     ResultadoProcesamiento,
+    SenalConfirmada,
+    TipoEvento,
 )
 from .posicion_linea import EstimadorLinea
 from .preprocesamiento import Preprocesador
@@ -59,6 +62,26 @@ def _dentro_de_roi(
     x, y, w, h = caja_px
     rx, ry, rw, rh = roi_senales_px
     return bool(x >= rx and y >= ry and x + w <= rx + rw and y + h <= ry + rh)
+
+
+def _sin_confirmacion_atendida(
+    eventos: list[EventoSenal], ocurrencia_id: int
+) -> list[EventoSenal]:
+    """Quita la re-confirmación de una ocurrencia que ya produjo su acción.
+
+    La etapa de detección puede volver a emitir ``PARE_CONFIRMADO`` o
+    ``SIGA_CONFIRMADO`` para la misma ocurrencia si la señal desaparece más de
+    ``k_tolerancia`` fotogramas y vuelve a verse durante el cruce. Esa
+    re-confirmación **no es una señal nueva**: si llegara a la FSM, volvería a
+    detener al robot 3 s sobre la señal que ya está atravesando. Los demás
+    eventos de la ocurrencia (``SENAL_PERDIDA``) se conservan para el registro.
+    """
+    tipos = (TipoEvento.PARE_CONFIRMADO, TipoEvento.SIGA_CONFIRMADO)
+    return [
+        evento
+        for evento in eventos
+        if not (evento.tipo in tipos and evento.ocurrencia_id == ocurrencia_id)
+    ]
 
 
 class PipelineVision:
@@ -101,10 +124,24 @@ class PipelineVision:
             mascara_verde=segmentacion.mascara_verde,
             roi_senales_px=segmentacion.roi_senales,
         )
-        deteccion = self._detector.actualizar(candidatos, indice, t_s)
+        deteccion = self._detector.actualizar(
+            candidatos,
+            indice,
+            t_s,
+            permitir_rearme=not self._control.cruce_activo,
+        )
         visibilidad = self._marcar_visibilidad(candidatos, segmentacion.roi_senales, indice, t_s)
         for clase in deteccion.clases_rearmadas:
             self._visibilidad_plena[clase] = None
+
+        # Cruce de señal (feature 003): la primera confirmación de una ocurrencia
+        # arma el cruce y pasa al resto del sistema; las re-confirmaciones de una
+        # ocurrencia ya atendida se descartan para que la FSM no vuelva a
+        # detener al robot por la misma señal física (ver `iniciar_cruce`).
+        eventos = list(deteccion.eventos)
+        for senal in deteccion.senales_confirmadas:
+            if not self._control.iniciar_cruce(senal.clase, senal.ocurrencia_id):
+                eventos = _sin_confirmacion_atendida(eventos, senal.ocurrencia_id)
 
         # Etapas de control: posición lateral → propuesta del control. El
         # estimador tolera máscaras vacías devolviendo una posición inválida
@@ -118,7 +155,7 @@ class PipelineVision:
             segmentacion=segmentacion,
             candidatos=candidatos,
             senales_confirmadas=list(deteccion.senales_confirmadas),
-            eventos=list(deteccion.eventos),
+            eventos=eventos,
             latencia_ms=latencia_ms,
             visibilidad_plena=visibilidad,
             posicion=posicion,

@@ -21,10 +21,12 @@ si la FSM veta, el compositor lo impusará después (FR-024, SC-007).
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from src.vision.configuracion import ParametrosConfiguracion
 from src.vision.modelos import (
     CausaComando,
+    ClaseSenal,
     ComandoMovimiento,
     DecisionControl,
     Lado,
@@ -40,23 +42,37 @@ __all__ = ["ControlTrayectoria"]
 #: redondo.
 _REINTENTOS_BUSQUEDA = 4
 
-#: Turnos de avance forzado tras salir de un STOP. La señal está **sobre la
-#: pista**: al reanudar, el robot debe seguir recto y dejar que la línea
-#: reaparezca por debajo del octágono, no girar buscándola. Sin esto, la parada
-#: dejaba el control en estado de recuperación y el robot salía girando. Cuatro
-#: turnos (≈1.6 s a la cadencia de 12 fotogramas) cubren el paso por encima de
-#: la señal.
-_TURNOS_TRAS_STOP = 4
+
+@dataclass(frozen=True)
+class _CruceSenal:
+    """Señal confirmada que el robot está atravesando (PARE o SIGA).
+
+    Mientras exista un cruce, una línea que no se ve **no es una pista
+    perdida**: es la señal tapándola. El cruce no dura una cantidad fija de
+    fotogramas ni de turnos —cada señal puede tardar un tiempo distinto en
+    quedar atrás—, sino hasta que la línea vuelva a detectarse.
+    """
+
+    clase: ClaseSenal
+    ocurrencia_id: int
 
 
 class ControlTrayectoria:
     """Convierte la posición lateral estimada en un comando de movimiento.
 
-    Es **stateful**: mantiene dos datos —el último lado en que se vio la línea
-    y el último comando de seguimiento— que son los que hacen posible la
-    histéresis y la recuperación. El estado avanza creando instancias nuevas de
-    ``LadoConocido`` (frozen), nunca mutando las viejas, para que cada paso sea
-    comparable y auditable (FR-018).
+    Es **stateful**: mantiene el último lado en que se vio la línea y el último
+    comando de seguimiento —que hacen posible la histéresis y la recuperación—
+    y el **cruce de señal** en curso. El estado avanza creando instancias nuevas
+    de ``LadoConocido`` (frozen), nunca mutando las viejas, para que cada paso
+    sea comparable y auditable (FR-018).
+
+    **Señal sobre la pista frente a línea perdida.** El estimador es honesto: si
+    el octágono tapa la línea, devuelve una posición inválida, exactamente igual
+    que si la línea se hubiera salido del cuadro. La diferencia no está en la
+    medición sino en el contexto: cuando una señal se confirma, el pipeline avisa
+    con :meth:`iniciar_cruce` y este control deja de interpretar la ausencia como
+    una pérdida. Sin ese contexto, el robot trataba el cruce como un
+    ``descarrilamiento`` y salía a buscar la pista de lado a lado en plena señal.
     """
 
     def __init__(self, params: ParametrosConfiguracion) -> None:
@@ -67,8 +83,20 @@ class ControlTrayectoria:
         #: lleva aparte de ``fotogramas_perdidos`` para no romper el congelado de
         #: la memoria (FR-020) que documenta el diagnóstico.
         self._reintento = 0
-        #: Fotogramas de avance forzado que quedan al salir de un STOP.
-        self._tras_stop = 0
+        #: Señal que el robot está atravesando, si hay alguna. Mientras exista,
+        #: una posición inválida no entra en ``_sin_linea``: la señal está
+        #: tapando la línea y hay que seguir recto, no buscar.
+        self._cruce: _CruceSenal | None = None
+        #: True si ``_cruce`` acaba de armarse, para no cerrarlo en el mismo
+        #: fotograma de la confirmación (la señal apenas empieza a tapar).
+        self._cruce_nuevo = False
+        #: Ocurrencias ya atendidas: una misma ``ocurrencia_id`` produce una
+        #: sola acción aunque la señal desaparezca y vuelva durante el cruce.
+        self._ocurrencias_atendidas: set[int] = set()
+        #: True mientras la FSM veta el movimiento (parada del PARE). ``decidir``
+        #: lo consume al fotograma siguiente; el compositor lo renueva en cada
+        #: fotograma vetado, así que el cruce sobrevive toda la parada.
+        self._sostenido = False
         self._fotograma = 0
 
     # ------------------------------------------------------------------
@@ -84,6 +112,28 @@ class ControlTrayectoria:
         ante cualquier condición no reconocida.
         """
         try:
+            # El aviso del compositor dura un fotograma: se consume aquí.
+            sostenido = self._sostenido
+            self._sostenido = False
+
+            if self._cruce is not None:
+                if pos.valida and not sostenido and not self._cruce_nuevo:
+                    # La línea volvió a verse con el robot ya avanzando: la
+                    # señal quedó atrás y el cruce termina.
+                    self._cruce = None
+                else:
+                    # Atravesando la señal (o aún detenido por el PARE): avanzar
+                    # recto. No se busca ni se gira aunque la línea no se vea.
+                    # Si la FSM veta, el compositor convierte esto en DETENER.
+                    self._cruce_nuevo = False
+                    self._fotograma += 1
+                    return DecisionControl(
+                        comando=ComandoMovimiento.AVANZAR,
+                        causa=CausaComando.CRUCE_SENAL,
+                        lateral=self._lateral,
+                    )
+            self._cruce_nuevo = False
+
             if pos.valida:
                 return self._con_linea(pos)
             return self._sin_linea()
@@ -97,25 +147,51 @@ class ControlTrayectoria:
         self._lateral = None
         self._seguimiento = None
         self._reintento = 0
-        self._tras_stop = 0
+        self._cruce = None
+        self._cruce_nuevo = False
+        self._ocurrencias_atendidas.clear()
+        self._sostenido = False
         self._fotograma = 0
 
-    def sostener(self) -> None:
-        """Congela el seguimiento mientras la FSM veta el movimiento (PARE).
+    def iniciar_cruce(self, clase: ClaseSenal, ocurrencia_id: int) -> bool:
+        """Avisa que una señal se confirmó y el robot va a atravesarla.
 
-        **Por qué hace falta.** Mientras el robot está parado sobre el STOP la
-        señal tapa la línea. Si el control siguiera contando fotogramas sin verla,
-        al reanudar estaría en plena búsqueda y saldría **girando** hacia un lado
-        en vez de continuar recto: es el fallo de "después del PARE intenta
-        reubicarse". Aquí se descarta esa cuenta y se deja armado un tramo corto
-        de avance para después de la parada.
+        Devuelve ``True`` la **primera** vez que se ve esa ocurrencia —y entonces
+        su confirmación debe llegar normalmente al resto del sistema— y ``False``
+        si ya fue atendida: una misma ``ocurrencia_id`` solo produce una acción,
+        aunque la señal desaparezca y vuelva a aparecer mientras el robot la
+        cruza, y aunque el detector la rearme por ``x_rearme``.
 
-        La señal SIGA no pasa por aquí: no veta el movimiento, así que el robot
-        simplemente sigue su trayectoria sin detenerse.
+        Este aviso es lo que separa «la señal tapa la línea» de «perdí la pista».
         """
+        if ocurrencia_id in self._ocurrencias_atendidas:
+            return False
+        self._ocurrencias_atendidas.add(ocurrencia_id)
+        self._cruce = _CruceSenal(clase=clase, ocurrencia_id=ocurrencia_id)
+        self._cruce_nuevo = True
+        self._reintento = 0
+        return True
+
+    @property
+    def cruce_activo(self) -> bool:
+        """¿El robot está atravesando una señal confirmada?"""
+        return self._cruce is not None
+
+    def sostener(self) -> None:
+        """Marca que la FSM tiene el movimiento vetado en este fotograma (PARE).
+
+        **Por qué hace falta.** Mientras el robot está parado en el STOP la señal
+        tapa la línea. El cruce debe sobrevivir a toda la parada y cerrarse solo
+        cuando la línea vuelva a verse con el robot ya avanzando; si no, el
+        primer fotograma sin línea después del STOP entraría en recuperación y el
+        robot saldría girando en vez de seguir recto.
+
+        La señal SIGA no pasa por aquí: no veta el movimiento, así que el cruce
+        avanza sin detenerse.
+        """
+        self._sostenido = True
         self._seguimiento = None
         self._reintento = 0
-        self._tras_stop = _TURNOS_TRAS_STOP * max(1, self._params.fotogramas_por_orden)
         if self._lateral is not None:
             self._lateral = LadoConocido(
                 lado=self._lateral.lado,
@@ -141,10 +217,8 @@ class ControlTrayectoria:
             lado = self._lateral.lado if self._lateral is not None else None
 
         # Q10: con línea visible el contador de pérdidas vuelve a cero, y con él
-        # el reintento de búsqueda: ya no hace falta. También se desarma el avance
-        # posterior al STOP: la línea ya está a la vista.
+        # el reintento de búsqueda: ya no hace falta.
         self._reintento = 0
-        self._tras_stop = 0
         self._lateral = (
             LadoConocido(lado=lado, fotograma=self._fotograma, fotogramas_perdidos=0)
             if lado is not None
@@ -201,24 +275,19 @@ class ControlTrayectoria:
     # ------------------------------------------------------------------
 
     def _sin_linea(self) -> DecisionControl:
-        """Pérdida de línea: buscar hacia el lado memorizado, o parar si no hay."""
+        """Pérdida de línea: buscar hacia el lado memorizado, o parar si no hay.
+
+        Solo se llega aquí **sin cruce de señal activo**: si una señal confirmada
+        está siendo atravesada, ``decidir`` devuelve el avance recto antes de
+        entrar a esta rama, porque la línea ausente es la señal tapándola y no
+        una pista perdida.
+        """
         # La histéresis se olvida al perder la línea: durante la búsqueda la
         # pose del robot cambia sin ninguna medición válida, así que el comando
         # anterior describe una geometría que ya no existe. Al reaparecer la
         # línea, un error en la banda vuelve a empezar desde AVANZAR (T020).
         self._seguimiento = None
         self._fotograma += 1
-
-        if self._tras_stop > 0:
-            # Recién salido de un STOP: la señal estaba SOBRE la pista y puede
-            # tapar la línea. Se avanza recto y se deja que reaparezca por debajo
-            # del octágono, en vez de girar buscándola.
-            self._tras_stop -= 1
-            return DecisionControl(
-                comando=ComandoMovimiento.AVANZAR,
-                causa=CausaComando.SEGUIMIENTO,
-                lateral=self._lateral,
-            )
 
         if self._lateral is None:
             return DecisionControl(

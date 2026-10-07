@@ -14,6 +14,7 @@ Grupos:
 - T018: sostenimiento del comando con error grande y constante
 - T019: fallo seguro
 - T020: recuperación y memoria del último lado
+- 003: cruce de señal (la señal tapa la línea; no es una pérdida de pista)
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ from src.vision.configuracion import ParametrosConfiguracion
 from src.vision.control_trayectoria import ControlTrayectoria
 from src.vision.modelos import (
     CausaComando,
+    ClaseSenal,
     ComandoMovimiento,
     Lado,
     PosicionLinea,
@@ -417,3 +419,113 @@ def test_la_gracia_cero_detiene_en_el_primer_fotograma_perdido() -> None:
     d = control.decidir(_perdida())
     assert d.comando is ComandoMovimiento.DETENER
     assert d.causa is CausaComando.GRACIA_AGOTADA
+
+
+# ---------------------------------------------------------------------------
+# Feature 003 — cruce de señal: la señal tapa la línea, no es una pérdida
+# ---------------------------------------------------------------------------
+
+
+def test_una_ocurrencia_solo_arma_el_cruce_una_vez() -> None:
+    """``ocurrencia_id`` repetido no vuelve a armar el cruce (anti-reproceso)."""
+    control = _control()
+    assert control.iniciar_cruce(ClaseSenal.PARE, 7) is True
+    assert control.cruce_activo is True
+    assert control.iniciar_cruce(ClaseSenal.PARE, 7) is False
+    assert control.cruce_activo is True
+    assert control.iniciar_cruce(ClaseSenal.PARE, 8) is True
+
+
+def test_en_cruce_la_linea_tapada_avanza_recto_sin_buscar() -> None:
+    """Sin tope de fotogramas: la señal tapa la línea hasta que el robot pasa.
+
+    No se usa una cantidad fija de frames ni de turnos: el cruce dura lo que
+    tarde la línea en volver a verse, y durante todo ese tiempo el comando es
+    ``AVANZAR`` conservando la última lateral conocida, no una búsqueda.
+    """
+    control = _control()
+    control.decidir(_pos(0.30))  # memoria: DERECHA
+    control.iniciar_cruce(ClaseSenal.SIGA, 0)
+    for _ in range(500):
+        d = control.decidir(_perdida())
+        assert d.comando is ComandoMovimiento.AVANZAR
+        assert d.causa is CausaComando.CRUCE_SENAL
+        assert d.lateral is not None and d.lateral.lado is Lado.DERECHA
+    assert control.cruce_activo is True
+
+
+def test_en_cruce_no_existen_recuperacion_ni_gracia_agotada() -> None:
+    """Ni con la gracia más corta posible: durante el cruce no hay búsqueda."""
+    control = _control(n_gracia_busqueda=0)
+    control.decidir(_pos(-0.30))
+    control.iniciar_cruce(ClaseSenal.PARE, 0)
+    causas = {control.decidir(_perdida()).causa for _ in range(50)}
+    assert causas == {CausaComando.CRUCE_SENAL}
+
+
+def test_el_fotograma_de_la_confirmacion_no_cierra_el_cruce() -> None:
+    """La línea puede verse justo al confirmar; el cruce no muere ahí."""
+    control = _control()
+    control.iniciar_cruce(ClaseSenal.SIGA, 0)
+    d = control.decidir(_pos(0.30))
+    assert d.causa is CausaComando.CRUCE_SENAL
+    assert control.cruce_activo is True
+
+
+def test_el_cruce_termina_cuando_la_linea_reaparece() -> None:
+    """Primera línea válida tras el cruce: vuelve el seguimiento normal."""
+    control = _control()
+    control.decidir(_pos(0.30))
+    control.iniciar_cruce(ClaseSenal.SIGA, 0)
+    control.decidir(_perdida())  # fotograma de confirmación
+    assert control.cruce_activo is True
+    d = control.decidir(_pos(0.30))
+    assert control.cruce_activo is False
+    assert d.comando is ComandoMovimiento.DERECHA
+    assert d.causa is CausaComando.CORRECCION_DERECHA
+
+
+def test_el_cruce_sobrevive_a_la_parada_del_pare() -> None:
+    """El veto renueva el aviso: el cruce no se cierra durante los 3 s."""
+    control = _control()
+    control.iniciar_cruce(ClaseSenal.PARE, 0)
+    for _ in range(90):  # 3 s a 30 fps
+        assert control.decidir(_pos(0.30)).causa is CausaComando.CRUCE_SENAL
+        control.sostener()  # el compositor avisa en cada fotograma vetado
+    # Primer fotograma tras T: aún sostenido, sigue el avance del cruce.
+    assert control.decidir(_pos(0.30)).causa is CausaComando.CRUCE_SENAL
+    # Al siguiente, sin veto y con línea a la vista, manda el seguimiento.
+    d = control.decidir(_pos(0.30))
+    assert d.causa is CausaComando.CORRECCION_DERECHA
+    assert control.cruce_activo is False
+
+
+def test_una_ocurrencia_ya_atendida_no_rearma_el_cruce() -> None:
+    """Cerrado el cruce, la misma ocurrencia no vuelve a proteger."""
+    control = _control()
+    control.iniciar_cruce(ClaseSenal.PARE, 3)
+    control.decidir(_perdida())
+    control.decidir(_pos(0.0))  # línea de nuevo: cruce cerrado
+    assert control.cruce_activo is False
+    assert control.iniciar_cruce(ClaseSenal.PARE, 3) is False
+    d = control.decidir(_perdida())
+    assert d.causa is CausaComando.PERDIDA_SIN_MEMORIA
+
+
+def test_una_ocurrencia_nueva_si_arma_un_cruce_nuevo() -> None:
+    """Una señal distinta (otro ``ocurrencia_id``) vuelve a proteger."""
+    control = _control()
+    control.iniciar_cruce(ClaseSenal.PARE, 1)
+    control.decidir(_perdida())
+    control.decidir(_pos(0.0))
+    assert control.iniciar_cruce(ClaseSenal.PARE, 2) is True
+    assert control.decidir(_perdida()).causa is CausaComando.CRUCE_SENAL
+
+
+def test_reiniciar_olvida_el_cruce_y_las_ocurrencias_atendidas() -> None:
+    """Entre corridas no sobrevive ni el cruce ni su histórico de ocurrencias."""
+    control = _control()
+    control.iniciar_cruce(ClaseSenal.PARE, 0)
+    control.reiniciar()
+    assert control.cruce_activo is False
+    assert control.iniciar_cruce(ClaseSenal.PARE, 0) is True

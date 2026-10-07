@@ -92,8 +92,18 @@ class Detector:
         candidatos: Sequence[CandidatoSenal],
         indice: int,
         t_s: float,
+        *,
+        permitir_rearme: bool = True,
     ) -> ResultadoDeteccion:
-        """Procesa un fotograma: confirma, revoca, re-arma y emite eventos."""
+        """Procesa un fotograma: confirma, revoca, re-arma y emite eventos.
+
+        ``permitir_rearme=False`` significa que el llamador sabe que el robot
+        está **atravesando** una señal: la ocurrencia no se cierra por muchos
+        fotogramas que la señal siga oculta, porque mientras el robot pasa por
+        encima el octágono puede salir y volver a entrar de la ROI. Sin este
+        bloqueo, esos vaivenes re-armaban la ocurrencia y la misma señal física
+        generaba una segunda confirmación —y un segundo PARE— en pleno cruce.
+        """
         confirmadas: list[SenalConfirmada] = []
         eventos: list[EventoSenal] = []
         presentes: set[ClaseSenal] = set()
@@ -148,8 +158,15 @@ class Detector:
                 elif not rastro.confirmada and rastro.sin_ver > self._params.k_tolerancia:
                     # Sin confirmar aún: un hueco > K cancela lo acumulado.
                     rastro.conteo = 0
-                if rastro.ocurrencia_id is not None and rastro.sin_ver >= self._params.x_rearme:
+                if (
+                    permitir_rearme
+                    and rastro.ocurrencia_id is not None
+                    and rastro.sin_ver >= self._params.x_rearme
+                ):
                     # Re-armado: cerrar la ocurrencia y permitir una nueva (FR-021).
+                    # Se pospone mientras el robot cruza una señal: la ocurrencia
+                    # abierta no debe fragmentarse en varias por sus propios
+                    # parpadeos, o el mismo PARE volvería a detener al robot.
                     self._cerrar_ocurrencia(rastro.ocurrencia_id, indice, t_s)
                     if clase is ClaseSenal.PARE:
                         eventos.append(

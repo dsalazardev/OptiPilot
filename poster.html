@@ -1,0 +1,697 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OptiPilot · Póster A1 · Reto 1</title>
+<style>
+/* =========================================================================
+   OptiPilot · Póster académico A1 vertical (594 x 841 mm)
+   Unidad base: 1rem = 1 mm del póster. En pantalla el póster escala al ancho
+   de la ventana; al imprimir usa 1 mm real (Ctrl+P > Guardar como PDF).
+   ========================================================================= */
+:root {
+  --u: min(1mm, calc(100vw / 610));
+  --navy: #0B2545;
+  --azul: #1D4E89;
+  --acento: #16A6B6;
+  --acento-claro: #7FE3EE;
+  --texto: #223044;
+  --gris: #5F6F82;
+  --fondo: #EEF3F7;
+  --pare: #D62839;
+  --siga: #1E9E57;
+  --alerta: #E8A317;
+  --sombra: 0 0.5rem 1.8rem rgba(11, 37, 69, 0.08), 0 0.1rem 0.4rem rgba(11, 37, 69, 0.06);
+}
+@page { size: 594mm 841mm; margin: 0; }
+html { font-size: var(--u); }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: #D5DEE7;
+  font-family: "Segoe UI", "Segoe UI Variable Text", "Helvetica Neue", Arial, sans-serif;
+  color: var(--texto);
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* ---------- Lienzo ---------- */
+.poster {
+  width: 594rem;
+  height: 841rem;
+  margin: 0 auto;
+  background: var(--fondo);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 1rem 4rem rgba(0, 0, 0, 0.18);
+}
+
+/* ---------- Cabecera ---------- */
+.cabecera {
+  position: relative;
+  flex: none;
+  overflow: hidden;
+  color: #fff;
+  padding: 18rem 20rem 24rem;
+  background: linear-gradient(118deg, #0B2545 0%, #12375F 55%, #1D4E89 100%);
+}
+.cabecera::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 0.4rem, transparent 0.4rem),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0.4rem, transparent 0.4rem);
+  background-size: 14rem 14rem;
+}
+.cabecera::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 2.4rem;
+  background: linear-gradient(90deg, var(--acento), var(--acento-claro) 40%, var(--alerta));
+}
+.cabecera > * { position: relative; }
+.kicker {
+  margin: 0;
+  font-size: 5.4rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--acento-claro);
+}
+.cabecera h1 {
+  margin: 7rem 0 0;
+  max-width: 540rem;
+  font-size: 23rem;
+  line-height: 1.04;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+}
+.marca { color: var(--acento-claro); }
+.autores { margin: 9rem 0 0; font-size: 8.4rem; font-weight: 600; }
+.materia { margin: 3.6rem 0 0; font-size: 5.6rem; color: #BFD7EA; }
+
+/* ---------- Cajas destacadas (KPI) ---------- */
+.kpis {
+  flex: none;
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 5rem;
+  padding: 0 18rem;
+  margin-top: -14rem;
+}
+.kpi {
+  background: #fff;
+  border-radius: 3.2rem;
+  padding: 7rem 6rem 6.4rem;
+  box-shadow: var(--sombra);
+  border-top: 1.4rem solid var(--acento);
+}
+.kpi-pare { border-top-color: var(--pare); }
+.cifra {
+  font-size: 17rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--navy);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-pare .cifra { color: var(--pare); }
+.unidad { margin-left: 1.4rem; font-size: 7rem; font-weight: 600; color: var(--gris); }
+.kpi-pare .unidad { color: var(--pare); }
+.kpi-etiqueta { margin-top: 4rem; font-size: 5.2rem; font-weight: 700; line-height: 1.25; color: var(--texto); }
+.kpi-nota { margin-top: 1.8rem; font-size: 4.9rem; line-height: 1.3; color: var(--gris); overflow-wrap: anywhere; }
+
+/* ---------- Tres columnas ---------- */
+.columnas {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6rem;
+  padding: 10rem 18rem 8rem;
+}
+.col { display: flex; flex-direction: column; gap: 6rem; min-height: 0; }
+.tarjeta {
+  background: #fff;
+  border-radius: 3.2rem;
+  padding: 7rem 7rem 7.4rem;
+  box-shadow: var(--sombra);
+}
+.tarjeta h2 {
+  display: flex;
+  align-items: center;
+  gap: 3.2rem;
+  margin: 0 0 5rem;
+  font-size: 7.4rem;
+  line-height: 1.1;
+  font-weight: 700;
+  color: var(--navy);
+}
+.num {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 12rem;
+  height: 12rem;
+  border-radius: 3rem;
+  background: linear-gradient(135deg, var(--acento) 0%, var(--azul) 100%);
+  color: #fff;
+  font-size: 5.6rem;
+  font-weight: 700;
+}
+.tarjeta > p { margin: 0 0 3.8rem; font-size: 6.4rem; line-height: 1.38; }
+.tarjeta > p:last-child { margin-bottom: 0; }
+.tarjeta > .nota-pie { margin: 4rem 0 0; font-size: 5.2rem; line-height: 1.35; color: var(--gris); }
+figure { margin: 0; }
+figcaption { margin-top: 4rem; font-size: 5.2rem; line-height: 1.35; color: var(--gris); }
+
+/* ---------- Imágenes reales ---------- */
+.figura img {
+  display: block;
+  width: 100%;
+  height: 158rem;
+  object-fit: cover;
+  object-position: 50% 60%;
+  border-radius: 2.2rem;
+}
+.visor img {
+  display: block;
+  width: auto;
+  height: 130rem;
+  max-width: 100%;
+  margin: 0 auto;
+  border-radius: 2.2rem;
+  box-shadow: 0 0.3rem 1rem rgba(11, 37, 69, 0.15);
+}
+.c-cian { color: #0F94A8; font-weight: 700; }
+.c-amar { color: #B88600; font-weight: 700; }
+.c-blan { color: #334155; font-weight: 700; }
+.c-gris { color: #6B7280; font-weight: 700; }
+
+/* ---------- Placeholders (áreas vacías etiquetadas) ---------- */
+.placeholder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3.4rem;
+  padding: 8rem 7rem;
+  text-align: center;
+  color: #35618C;
+  border: 0.6rem dashed #7FA7CF;
+  border-radius: 3.2rem;
+  background:
+    repeating-linear-gradient(135deg, rgba(22, 166, 182, 0.08) 0 3.2rem, rgba(22, 166, 182, 0) 3.2rem 6.4rem),
+    #F6FAFD;
+  outline: 0.5rem solid rgba(22, 166, 182, 0.25);
+  outline-offset: 1.8rem;
+}
+.ph-tag {
+  position: absolute;
+  top: 5rem;
+  left: 5rem;
+  padding: 1.4rem 3.2rem;
+  border-radius: 20rem;
+  background: var(--azul);
+  color: #fff;
+  font-size: 3.8rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.ph-titulo { font-size: 7rem; font-weight: 700; line-height: 1.15; color: var(--navy); }
+.ph-texto { max-width: 118rem; font-size: 4.9rem; line-height: 1.35; color: #4D7396; }
+.ph-diagrama { height: 156rem; }
+.ph-icono { width: 34rem; height: 17rem; }
+.ph-qr { flex: none; width: 50rem; height: 50rem; padding: 4.5rem 3.5rem 3.5rem; }
+.ph-qrico { width: 21rem; height: 21rem; }
+.ph-qr .ph-titulo { font-size: 5.4rem; }
+
+/* ---------- Etapas del pipeline ---------- */
+ol.pasos { margin: 5rem 0 0; padding: 0; list-style: none; counter-reset: paso; }
+ol.pasos li {
+  counter-increment: paso;
+  position: relative;
+  min-height: 11.5rem;
+  margin: 0 0 3.4rem;
+  padding-left: 15rem;
+  font-size: 6.2rem;
+  line-height: 1.3;
+}
+ol.pasos li:last-child { margin-bottom: 0; }
+ol.pasos li::before {
+  content: counter(paso);
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  place-items: center;
+  width: 10.5rem;
+  height: 10.5rem;
+  border-radius: 50%;
+  background: var(--azul);
+  color: #fff;
+  font-size: 5.2rem;
+  font-weight: 700;
+}
+ol.pasos strong { color: var(--navy); }
+
+/* ---------- Tabla de técnicas ---------- */
+table.tabla { width: 100%; border-collapse: collapse; font-size: 6.2rem; line-height: 1.32; }
+table.tabla th {
+  padding: 0 0 2.6rem;
+  text-align: left;
+  font-size: 4.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gris);
+  border-bottom: 0.5rem solid var(--navy);
+}
+table.tabla td {
+  padding: 3.4rem 2rem 3.4rem 0;
+  vertical-align: top;
+  border-bottom: 0.3rem solid #E3EAF1;
+}
+table.tabla tr:last-child td { border-bottom: none; }
+table.tabla td:first-child { width: 36%; padding-right: 4rem; font-weight: 700; color: var(--navy); }
+code {
+  padding: 0.2rem 0.8rem;
+  border-radius: 0.8rem;
+  background: #EAF2F8;
+  color: var(--azul);
+  font-family: Consolas, "Cascadia Mono", monospace;
+  font-size: 0.9em;
+}
+
+/* ---------- Corrida: presupuesto de tiempo ---------- */
+.presupuesto { margin-top: 4.6rem; }
+.pres-etq { display: flex; justify-content: space-between; align-items: baseline; font-size: 5.4rem; font-weight: 600; color: var(--texto); }
+.pres-etq b { font-size: 6.4rem; color: var(--navy); }
+.pista { height: 10.5rem; border-radius: 5rem; background: #E4ECF4; overflow: hidden; }
+.pista i { display: block; height: 100%; border-radius: 5rem; }
+.presupuesto .pista { margin-top: 2.4rem; }
+.c-pres { background: linear-gradient(90deg, var(--acento), var(--azul)); }
+.pres-nota { margin-top: 2.4rem; font-size: 5rem; color: var(--gris); }
+
+/* ---------- Línea de tiempo PARE / SIGA ---------- */
+.linea-tiempo { display: block; width: 100%; height: auto; }
+.leyenda { display: flex; flex-wrap: wrap; gap: 3rem 6rem; margin-top: 4rem; font-size: 5rem; color: var(--gris); }
+.leyenda span { display: inline-flex; align-items: center; gap: 2rem; }
+.sw-pare { display: inline-block; width: 7rem; height: 4.4rem; border-radius: 0.8rem; background: var(--pare); }
+.sw-siga { display: inline-block; width: 1.4rem; height: 6.4rem; border-radius: 0.6rem; background: var(--siga); }
+
+/* ---------- Listas con viñeta ---------- */
+ul.lista { margin: 4.6rem 0 0; padding: 0; list-style: none; }
+ul.lista li { position: relative; margin: 0 0 3.6rem; padding-left: 8rem; font-size: 6.2rem; line-height: 1.36; }
+ul.lista li:last-child { margin-bottom: 0; }
+ul.lista li::before {
+  content: "";
+  position: absolute;
+  left: 1.2rem;
+  top: 2.4rem;
+  width: 3.8rem;
+  height: 3.8rem;
+  border-radius: 50%;
+  background: var(--acento);
+}
+ul.lista.alerta li::before { background: var(--alerta); }
+
+/* ---------- Control de trayectoria ---------- */
+.barra {
+  display: grid;
+  grid-template-columns: 44rem minmax(0, 1fr) 40rem;
+  align-items: center;
+  gap: 3.4rem;
+  margin: 0 0 7rem;
+  font-size: 5.8rem;
+}
+.nom { font-weight: 700; color: var(--navy); }
+.val { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.c-av { background: var(--azul); }
+.c-iz { background: var(--acento); }
+.c-de { background: #6FB7E6; }
+.c-det { background: #8A99AD; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3.2rem; margin-top: 5rem; }
+.stat { padding: 6rem 2.6rem; border-radius: 2.4rem; background: #F2F6FA; text-align: center; }
+.stat b { display: block; font-size: 11rem; line-height: 1; font-weight: 700; color: var(--navy); }
+.stat span { display: block; margin-top: 2rem; font-size: 5rem; line-height: 1.25; color: var(--gris); }
+
+/* ---------- Conclusiones y referencias ---------- */
+.destacado {
+  margin-bottom: 5.4rem;
+  padding: 6.4rem;
+  border-radius: 2.8rem;
+  background: linear-gradient(135deg, var(--navy) 0%, var(--azul) 100%);
+  color: #fff;
+  font-size: 6.6rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.destacado b { color: var(--acento-claro); }
+.qr-fila { display: flex; align-items: center; gap: 6rem; }
+.qr-fila p { margin: 0; font-size: 6.2rem; line-height: 1.38; }
+.referencias h2 { font-size: 6rem; }
+.referencias ol { margin: 0; padding-left: 6rem; font-size: 5.2rem; line-height: 1.4; color: var(--gris); }
+.referencias li { margin-bottom: 1.8rem; }
+
+/* ---------- Pie ---------- */
+.pie {
+  flex: none;
+  height: 16rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6rem;
+  padding: 0 18rem;
+  background: var(--navy);
+  color: #C9DCEB;
+  font-size: 4.8rem;
+}
+.pie b { color: #fff; }
+
+/* ---------- Pantalla: escalado y reflujo responsivo ---------- */
+@media screen and (max-width: 1279px) {
+  :root { --u: calc(100vw / 300); }
+  .poster { width: 100%; height: auto; box-shadow: none; }
+  .cabecera { padding: 16rem 14rem 22rem; }
+  .cabecera h1 { font-size: 16rem; }
+  .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); padding: 0 14rem; }
+  .kpi:nth-child(5) { grid-column: span 2; }
+  .columnas { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10rem 14rem 8rem; }
+  .columnas > .col:nth-child(3) { grid-column: 1 / -1; }
+  .visor img { height: auto; width: 100%; }
+  .ph-diagrama { height: 100rem; }
+}
+@media screen and (max-width: 719px) {
+  :root { --u: calc(100vw / 130); }
+  .cabecera { padding: 12rem 8rem 18rem; }
+  .cabecera h1 { font-size: 13rem; }
+  .autores { font-size: 5.6rem; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0 8rem; }
+  .kpi:last-child { grid-column: 1 / -1; }
+  .cifra { font-size: 11rem; }
+  .columnas { grid-template-columns: minmax(0, 1fr); padding: 8rem; }
+  .columnas > .col:nth-child(3) { grid-column: auto; }
+  .figura img { height: 110rem; }
+  .visor img { height: auto; width: 100%; }
+  .ph-diagrama { height: 80rem; }
+  .qr-fila { flex-direction: column; align-items: flex-start; }
+  .ph-qr { width: 100%; height: 60rem; }
+  .barra { grid-template-columns: 30rem minmax(0, 1fr) 30rem; }
+  .pie { height: auto; flex-direction: column; gap: 3rem; padding: 6rem 8rem; text-align: center; }
+}
+
+/* ---------- Impresión: A1 exacto ---------- */
+@media print {
+  :root { --u: 1mm; }
+  body { background: none; }
+  .poster { box-shadow: none; margin: 0; }
+}
+</style>
+</head>
+<body>
+<main class="poster">
+
+  <header class="cabecera">
+    <p class="kicker">Reto 1 · Robótica / Visión por Computador</p>
+    <h1><span class="marca">OptiPilot:</span> Sistema de Navegación Autónoma y Control de Tráfico para mBot</h1>
+    <p class="autores">Jaime Andrés Cardona Díaz · Daner Alejandro Salazar Colorado · Carlos Alberto Gomez Posada</p>
+    <p class="materia">Visión Artificial en Tiempo Real · Universidad de Caldas · 2026</p>
+  </header>
+
+  <section class="kpis" aria-label="Métricas de la corrida final">
+    <article class="kpi">
+      <div class="cifra">12,007</div>
+      <div class="kpi-etiqueta">fotogramas procesados</div>
+      <div class="kpi-nota">corrida_20261007_111355</div>
+    </article>
+    <article class="kpi">
+      <div class="cifra">24.51<span class="unidad">FPS</span></div>
+      <div class="kpi-etiqueta">promedio de la corrida</div>
+      <div class="kpi-nota">≈ 490 s de recorrido</div>
+    </article>
+    <article class="kpi">
+      <div class="cifra">4.69<span class="unidad">ms</span></div>
+      <div class="kpi-etiqueta">latencia media de procesamiento</div>
+      <div class="kpi-nota">p95 = 5.58 ms por fotograma</div>
+    </article>
+    <article class="kpi kpi-pare">
+      <div class="cifra">9<span class="unidad">de 9</span></div>
+      <div class="kpi-etiqueta">paradas PARE completas</div>
+      <div class="kpi-nota">T&nbsp;=&nbsp;3.0&nbsp;s en cada parada</div>
+    </article>
+    <article class="kpi">
+      <div class="cifra">8.09<span class="unidad">px</span></div>
+      <div class="kpi-etiqueta">variación media de la posición lateral</div>
+      <div class="kpi-nota">entre fotogramas · p95 28.7 px</div>
+    </article>
+  </section>
+
+  <div class="columnas">
+
+    <!-- Columna 1 · Problema, foto y pipeline -->
+    <div class="col">
+      <article class="tarjeta">
+        <h2><span class="num">01</span>Objetivo</h2>
+        <p>Un mBot debe seguir una línea negra sobre la pista, corregir su trayectoria y reconocer dos señales: <strong>PARE</strong> (octágono rojo: detenerse un tiempo T) y <strong>SIGA</strong> (octágono verde). El Reto 1 exige visión artificial clásica: sin aprendizaje profundo, sin cascadas Haar ni modelos preentrenados.</p>
+      </article>
+
+      <article class="tarjeta">
+        <h2><span class="num">02</span>Foto real del mBot en pista</h2>
+        <figure class="figura">
+          <img src="assets/poster/mbot-pista.png" alt="mBot con cámara de smartphone sobre la pista, junto a las señales PARE y SIGA">
+          <figcaption>mBot en pista con las señales PARE (izquierda) y SIGA (derecha). Cámara: smartphone montado sobre el robot. Captura del 7 oct 2026.</figcaption>
+        </figure>
+      </article>
+
+      <article class="tarjeta">
+        <h2><span class="num">03</span>Pipeline de visión</h2>
+        <div class="placeholder ph-diagrama">
+          <span class="ph-tag">Placeholder</span>
+          <svg class="ph-icono" viewBox="0 0 120 60" aria-hidden="true">
+            <g fill="none" stroke="#35618C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="18" width="28" height="24" rx="5"/>
+              <rect x="46" y="18" width="28" height="24" rx="5"/>
+              <rect x="88" y="18" width="28" height="24" rx="5"/>
+              <path d="M32 30H46M74 30H88"/>
+              <path d="M40 25L46 30L40 35M82 25L88 30L82 35"/>
+            </g>
+          </svg>
+          <div class="ph-titulo">Diagrama del pipeline de visión</div>
+          <div class="ph-texto">Área reservada para la figura del flujo por etapas (SVG o PNG).</div>
+        </div>
+        <ol class="pasos">
+          <li><strong>Preprocesado:</strong> Gauss 5&nbsp;×&nbsp;5 y conversión a HSV</li>
+          <li><strong>Segmentación:</strong> inRange por color, apertura y cierre</li>
+          <li><strong>Candidatos:</strong> contornos y approxPolyDP</li>
+          <li><strong>Confirmación temporal:</strong> N&nbsp;=&nbsp;3 fotogramas, tolerancia K&nbsp;=&nbsp;2</li>
+          <li><strong>Máquina de estados:</strong> PARE detiene el robot durante T&nbsp;=&nbsp;3.0&nbsp;s</li>
+          <li><strong>Control:</strong> zona muerta e histéresis sobre la posición lateral</li>
+          <li><strong>Transporte:</strong> RFCOMM, 1 byte ASCII por comando</li>
+        </ol>
+      </article>
+    </div>
+
+    <!-- Columna 2 · Resultados -->
+    <div class="col">
+      <article class="tarjeta">
+        <h2><span class="num">04</span>Corrida final</h2>
+        <p>corrida_20261007_111355: entrada en vivo desde la cámara de smartphone por HTTP. Procesamiento en PC con Python 3.14, OpenCV y NumPy.</p>
+        <div class="presupuesto">
+          <div class="pres-etq"><span>Uso del tiempo por fotograma</span><b>11.5 %</b></div>
+          <div class="pista"><i class="c-pres" style="width:11.5%"></i></div>
+          <div class="pres-nota">4.69 ms de procesamiento frente a 40.8 ms disponibles a 24.51 FPS</div>
+        </div>
+      </article>
+
+      <article class="tarjeta">
+        <h2><span class="num">05</span>Técnicas autorizadas</h2>
+        <table class="tabla">
+          <thead>
+            <tr><th>Técnica</th><th>Uso y parámetros reales</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Filtro Gaussiano</td><td><code>GaussianBlur</code> 5&nbsp;×&nbsp;5 con σ automática, antes de convertir a HSV.</td></tr>
+            <tr><td>Espacio HSV</td><td><code>cvtColor</code> BGR → HSV. Línea: V&nbsp;≤&nbsp;110. PARE: H 0–10 y 170–179. SIGA: H 45–85.</td></tr>
+            <tr><td>Máscaras / morfología</td><td><code>inRange</code> por color; apertura y cierre con elipse de 5 px.</td></tr>
+            <tr><td>approxPolyDP para octágonos</td><td><code>approxPolyDP</code> con ε&nbsp;=&nbsp;0.03&nbsp;×&nbsp;perímetro. Válido con 7–9 vértices y aspecto entre 0.45&nbsp;y&nbsp;2.20.</td></tr>
+            <tr><td>Histéresis temporal</td><td>Confirma tras N&nbsp;=&nbsp;3 fotogramas con tolerancia K&nbsp;=&nbsp;2; re-arma tras 5 fotogramas sin ver la señal.</td></tr>
+          </tbody>
+        </table>
+        <p class="nota-pie">Las cuatro primeras figuran en la lista de técnicas permitidas del Reto 1. La histéresis temporal es lógica de conteo, sin aprendizaje.</p>
+      </article>
+
+      <article class="tarjeta">
+        <h2><span class="num">06</span>Señales PARE y SIGA</h2>
+        <svg class="linea-tiempo" viewBox="0 0 1000 170" role="img" aria-label="Línea de tiempo de la corrida: 9 paradas PARE y 21 señales SIGA confirmadas">
+          <line x1="0" y1="100" x2="1000" y2="100" stroke="#9AAEC2" stroke-width="3"/>
+          <g stroke="#9AAEC2" stroke-width="3">
+            <line x1="0" y1="100" x2="0" y2="113"/>
+            <line x1="122.4" y1="100" x2="122.4" y2="113"/>
+            <line x1="244.9" y1="100" x2="244.9" y2="113"/>
+            <line x1="367.3" y1="100" x2="367.3" y2="113"/>
+            <line x1="489.8" y1="100" x2="489.8" y2="113"/>
+            <line x1="612.2" y1="100" x2="612.2" y2="113"/>
+            <line x1="734.7" y1="100" x2="734.7" y2="113"/>
+            <line x1="857.1" y1="100" x2="857.1" y2="113"/>
+            <line x1="979.6" y1="100" x2="979.6" y2="113"/>
+          </g>
+          <g font-size="36" fill="#5F6F82">
+            <text x="0" y="160">0</text>
+            <text x="122.4" y="160" text-anchor="middle">1</text>
+            <text x="244.9" y="160" text-anchor="middle">2</text>
+            <text x="367.3" y="160" text-anchor="middle">3</text>
+            <text x="489.8" y="160" text-anchor="middle">4</text>
+            <text x="612.2" y="160" text-anchor="middle">5</text>
+            <text x="734.7" y="160" text-anchor="middle">6</text>
+            <text x="857.1" y="160" text-anchor="middle">7</text>
+            <text x="979.6" y="160" text-anchor="end">8 min</text>
+          </g>
+          <g fill="#1E9E57">
+            <rect x="10.8" y="40" width="5" height="60" rx="2"/>
+            <rect x="21.9" y="40" width="5" height="60" rx="2"/>
+            <rect x="28" y="40" width="5" height="60" rx="2"/>
+            <rect x="30.7" y="40" width="5" height="60" rx="2"/>
+            <rect x="38.4" y="40" width="5" height="60" rx="2"/>
+            <rect x="51.4" y="40" width="5" height="60" rx="2"/>
+            <rect x="93.8" y="40" width="5" height="60" rx="2"/>
+            <rect x="112.2" y="40" width="5" height="60" rx="2"/>
+            <rect x="113.8" y="40" width="5" height="60" rx="2"/>
+            <rect x="276.7" y="40" width="5" height="60" rx="2"/>
+            <rect x="280.4" y="40" width="5" height="60" rx="2"/>
+            <rect x="288.2" y="40" width="5" height="60" rx="2"/>
+            <rect x="473.6" y="40" width="5" height="60" rx="2"/>
+            <rect x="477.1" y="40" width="5" height="60" rx="2"/>
+            <rect x="491.2" y="40" width="5" height="60" rx="2"/>
+            <rect x="665.9" y="40" width="5" height="60" rx="2"/>
+            <rect x="666.9" y="40" width="5" height="60" rx="2"/>
+            <rect x="857.7" y="40" width="5" height="60" rx="2"/>
+            <rect x="859.8" y="40" width="5" height="60" rx="2"/>
+            <rect x="892.9" y="40" width="5" height="60" rx="2"/>
+            <rect x="906.1" y="40" width="5" height="60" rx="2"/>
+          </g>
+          <g fill="#D62839">
+            <rect x="194.1" y="100" width="6.2" height="34"/>
+            <rect x="222" y="100" width="6.3" height="34"/>
+            <rect x="370.1" y="100" width="6.3" height="34"/>
+            <rect x="378.2" y="100" width="6.1" height="34"/>
+            <rect x="578.7" y="100" width="6.5" height="34"/>
+            <rect x="769.6" y="100" width="6.2" height="34"/>
+            <rect x="894.1" y="100" width="6.1" height="34"/>
+            <rect x="955.3" y="100" width="6.2" height="34"/>
+            <rect x="972" y="100" width="6.2" height="34"/>
+          </g>
+        </svg>
+        <div class="leyenda">
+          <span><i class="sw-pare"></i>Parada PARE de 3.0 s</span>
+          <span><i class="sw-siga"></i>SIGA confirmado</span>
+          <span>Eje: minutos de la corrida</span>
+        </div>
+        <ul class="lista">
+          <li>PARE: 9 confirmaciones y 9 paradas completas de T&nbsp;=&nbsp;3.0&nbsp;s. Exceso medio sobre T: 46 ms (máx. 164 ms).</li>
+          <li>SIGA: 21 confirmaciones. SIGA se registra, pero no condiciona la reanudación: la decide el temporizador.</li>
+        </ul>
+        <p class="nota-pie">Inicio de cada parada (mm:ss): 01:35 · 01:49 · 03:01 · 03:05 · 04:44 · 06:17 · 07:18 · 07:48 · 07:56.</p>
+      </article>
+
+      <article class="tarjeta">
+        <h2><span class="num">07</span>Control de trayectoria</h2>
+        <p>Fotogramas por comando (total 12,007):</p>
+        <div class="barra"><span class="nom">AVANZAR</span><div class="pista"><i class="c-av" style="width:52.7%"></i></div><span class="val">6,326 · 52.7 %</span></div>
+        <div class="barra"><span class="nom">IZQUIERDA</span><div class="pista"><i class="c-iz" style="width:25.9%"></i></div><span class="val">3,107 · 25.9 %</span></div>
+        <div class="barra"><span class="nom">DERECHA</span><div class="pista"><i class="c-de" style="width:13.9%"></i></div><span class="val">1,666 · 13.9 %</span></div>
+        <div class="barra"><span class="nom">DETENER</span><div class="pista"><i class="c-det" style="width:7.6%"></i></div><span class="val">908 · 7.6 %</span></div>
+        <div class="stats">
+          <div class="stat"><b>368</b><span>correcciones (AVANZAR ↔ lateral)</span></div>
+          <div class="stat"><b>215</b><span>pérdidas de línea</span></div>
+          <div class="stat"><b>59</b><span>recuperaciones registradas</span></div>
+        </div>
+        <p class="nota-pie">Zona muerta de ±10 % del ancho del fotograma e histéresis de 3 % alrededor del objetivo central.</p>
+      </article>
+    </div>
+
+    <!-- Columna 3 · Evidencia, conclusiones y límites -->
+    <div class="col">
+      <article class="tarjeta">
+        <h2><span class="num">08</span>Captura del visor OpenCV</h2>
+        <figure class="visor">
+          <img src="assets/poster/visor-opencv.png" alt="Visor OpenCV en modo AUTÓNOMO con la máscara de la línea y la posición estimada">
+          <figcaption>Modo AUTÓNOMO. <span class="c-cian">Cian</span>: máscara de la línea. <span class="c-amar">Amarilla</span>: posición lateral estimada. <span class="c-blan">Blanca</span>: objetivo central. <span class="c-gris">Grises</span>: zona muerta e histéresis. Captura del 6 oct 2026.</figcaption>
+        </figure>
+      </article>
+
+      <article class="tarjeta">
+        <h2><span class="num">09</span>Video de la corrida</h2>
+        <div class="qr-fila">
+          <div class="placeholder ph-qr">
+            <span class="ph-tag">Placeholder</span>
+            <svg class="ph-qrico" viewBox="0 0 100 100" aria-hidden="true">
+              <g fill="none" stroke="#35618C" stroke-width="6">
+                <rect x="8" y="8" width="30" height="30"/>
+                <rect x="62" y="8" width="30" height="30"/>
+                <rect x="8" y="62" width="30" height="30"/>
+              </g>
+              <g fill="#35618C">
+                <rect x="19" y="19" width="8" height="8"/>
+                <rect x="73" y="19" width="8" height="8"/>
+                <rect x="19" y="73" width="8" height="8"/>
+                <rect x="62" y="62" width="10" height="10"/>
+                <rect x="78" y="62" width="14" height="6"/>
+                <rect x="62" y="78" width="6" height="14"/>
+                <rect x="74" y="80" width="18" height="12"/>
+              </g>
+            </svg>
+            <div class="ph-titulo">Código QR</div>
+          </div>
+          <p>Escanea el código para ver el video de la corrida. <em>Enlace pendiente de publicar.</em></p>
+        </div>
+      </article>
+
+      <article class="tarjeta">
+        <h2><span class="num">10</span>Conclusiones</h2>
+        <div class="destacado">Resultado principal: <b>9 de 9</b> paradas PARE completas con T&nbsp;=&nbsp;3.0&nbsp;s, en 12,007 fotogramas a 24.51 FPS.</div>
+        <ul class="lista">
+          <li>Pipeline clásico y explicable por etapa; solo técnicas permitidas por el Reto 1.</li>
+          <li>Procesamiento en tiempo real: 4.69 ms medios por fotograma, p95 5.58 ms.</li>
+          <li>Reanudación autónoma por temporizador tras cada parada PARE.</li>
+        </ul>
+      </article>
+
+      <article class="tarjeta">
+        <h2><span class="num">11</span>Límites y trabajo pendiente</h2>
+        <ul class="lista alerta">
+          <li>Sin anotación de referencia: no hay precisión ni recall de PARE y SIGA (criterios SC-001 a SC-003 pendientes).</li>
+          <li>Seguimiento inestable: 215 pérdidas de línea y 59 recuperaciones registradas.</li>
+          <li>Dos paradas separadas por 4 s podrían ser la misma señal; falta verificarlo con anotación.</li>
+          <li>La relación entre el comando y el giro físico depende del montaje: riesgo abierto.</li>
+          <li>24.5 FPS frente a 30 FPS objetivo.</li>
+        </ul>
+      </article>
+
+      <article class="tarjeta referencias">
+        <h2><span class="num">12</span>Referencias</h2>
+        <ol>
+          <li>Reto de visión artificial: el cerebro de un robot autónomo seguidor de línea. Enunciado del Reto 1.</li>
+          <li>Buitrago Carmona, F. Fundamentos Visión Artificial [material de curso]. Facultad de Inteligencia Artificial e Ingenierías, Universidad de Caldas.</li>
+          <li>OpenCV. OpenCV documentation: Image processing. docs.opencv.org.</li>
+        </ol>
+      </article>
+    </div>
+
+  </div>
+
+  <footer class="pie">
+    <span><b>OptiPilot</b> · Reto 1 · Visión Artificial en Tiempo Real · Universidad de Caldas</span>
+    <span>Datos: salidas/corrida_20261007_111355 (metricas.json, metricas_control.json, eventos.jsonl)</span>
+  </footer>
+
+</main>
+</body>
+</html>

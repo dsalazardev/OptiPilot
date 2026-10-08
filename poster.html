@@ -3,15 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>OptiPilot · Póster A1 · Reto 1</title>
+<title>OptiPilot · Póster 70×90 · Reto 1</title>
 <style>
 /* =========================================================================
-   OptiPilot · Póster académico A1 vertical (594 x 841 mm)
-   Unidad base: 1rem = 1 mm del póster. En pantalla el póster escala al ancho
-   de la ventana; al imprimir usa 1 mm real (Ctrl+P > Guardar como PDF).
+   OptiPilot · Póster académico 70 x 90 cm (700 x 900 mm)
+   Marco blanco de 20 mm; lienzo de 660 x 858 mm. Unidad base: 1rem = 1 mm.
+   En pantalla el póster escala al ancho de la ventana; al imprimir usa 1 mm
+   real (Ctrl+P > Guardar como PDF).
    ========================================================================= */
 :root {
-  --u: min(1mm, calc(100vw / 610));
+  --u: min(1mm, calc(100vw / 678));
   --navy: #0B2545;
   --azul: #1D4E89;
   --acento: #16A6B6;
@@ -24,7 +25,7 @@
   --alerta: #E8A317;
   --sombra: 0 0.5rem 1.8rem rgba(11, 37, 69, 0.08), 0 0.1rem 0.4rem rgba(11, 37, 69, 0.06);
 }
-@page { size: 594mm 841mm; margin: 0; }
+@page { size: 700mm 900mm; margin: 0; }
 html { font-size: var(--u); }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
@@ -38,8 +39,8 @@ body {
 
 /* ---------- Lienzo ---------- */
 .poster {
-  width: 594rem;
-  height: 841rem;
+  width: 660rem;
+  height: 858rem;
   margin: 0 auto;
   background: var(--fondo);
   display: flex;
@@ -84,7 +85,7 @@ body {
 }
 .cabecera h1 {
   margin: 7rem 0 0;
-  max-width: 540rem;
+  max-width: 600rem;
   font-size: 23rem;
   line-height: 1.04;
   font-weight: 700;
@@ -101,20 +102,20 @@ body {
   z-index: 2;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 5rem;
+  gap: 5.5rem;
   padding: 0 18rem;
   margin-top: -14rem;
 }
 .kpi {
   background: #fff;
   border-radius: 3.2rem;
-  padding: 7rem 6rem 6.4rem;
+  padding: 7.5rem 6rem 7rem;
   box-shadow: var(--sombra);
   border-top: 1.4rem solid var(--acento);
 }
 .kpi-pare { border-top-color: var(--pare); }
 .cifra {
-  font-size: 17rem;
+  font-size: 17.5rem;
   font-weight: 700;
   line-height: 1;
   color: var(--navy);
@@ -133,14 +134,14 @@ body {
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 6rem;
-  padding: 10rem 18rem 8rem;
+  gap: 7rem;
+  padding: 12rem 18rem 10rem;
 }
-.col { display: flex; flex-direction: column; gap: 6rem; min-height: 0; }
+.col { display: flex; flex-direction: column; gap: 7rem; min-height: 0; }
 .tarjeta {
   background: #fff;
   border-radius: 3.2rem;
-  padding: 7rem 7rem 7.4rem;
+  padding: 7.5rem 7.5rem 8rem;
   box-shadow: var(--sombra);
 }
 .tarjeta h2 {
@@ -148,7 +149,7 @@ body {
   align-items: center;
   gap: 3.2rem;
   margin: 0 0 5rem;
-  font-size: 7.4rem;
+  font-size: 7.7rem;
   line-height: 1.1;
   font-weight: 700;
   color: var(--navy);
@@ -165,17 +166,17 @@ body {
   font-size: 5.6rem;
   font-weight: 700;
 }
-.tarjeta > p { margin: 0 0 3.8rem; font-size: 6.4rem; line-height: 1.38; }
+.tarjeta > p { margin: 0 0 3.8rem; font-size: 6.6rem; line-height: 1.38; }
 .tarjeta > p:last-child { margin-bottom: 0; }
-.tarjeta > .nota-pie { margin: 4rem 0 0; font-size: 5.2rem; line-height: 1.35; color: var(--gris); }
+.tarjeta > .nota-pie { margin: 4rem 0 0; font-size: 5.3rem; line-height: 1.35; color: var(--gris); }
 figure { margin: 0; }
-figcaption { margin-top: 4rem; font-size: 5.2rem; line-height: 1.35; color: var(--gris); }
+figcaption { margin-top: 4rem; font-size: 5.3rem; line-height: 1.35; color: var(--gris); }
 
 /* ---------- Imágenes reales ---------- */
 .figura img {
   display: block;
   width: 100%;
-  height: 158rem;
+  height: 168rem;
   object-fit: cover;
   object-position: 50% 60%;
   border-radius: 2.2rem;
@@ -183,7 +184,7 @@ figcaption { margin-top: 4rem; font-size: 5.2rem; line-height: 1.35; color: var(
 .visor img {
   display: block;
   width: auto;
-  height: 130rem;
+  height: 134rem;
   max-width: 100%;
   margin: 0 auto;
   border-radius: 2.2rem;
@@ -227,9 +228,8 @@ figcaption { margin-top: 4rem; font-size: 5.2rem; line-height: 1.35; color: var(
   text-transform: uppercase;
 }
 .ph-titulo { font-size: 7rem; font-weight: 700; line-height: 1.15; color: var(--navy); }
-.ph-texto { max-width: 118rem; font-size: 4.9rem; line-height: 1.35; color: #4D7396; }
-.ph-diagrama { height: 156rem; }
-.ph-icono { width: 34rem; height: 17rem; }
+.diagrama { display: block; width: 100%; height: auto; max-width: 182rem; margin: 0 auto; }
+.diagrama .flecha, .diagrama .conexion { stroke: #5F6F82; stroke-width: 2.4; fill: none; }
 .ph-qr { flex: none; width: 50rem; height: 50rem; padding: 4.5rem 3.5rem 3.5rem; }
 .ph-qrico { width: 21rem; height: 21rem; }
 .ph-qr .ph-titulo { font-size: 5.4rem; }
@@ -240,9 +240,9 @@ ol.pasos li {
   counter-increment: paso;
   position: relative;
   min-height: 11.5rem;
-  margin: 0 0 3.4rem;
+  margin: 0 0 3.5rem;
   padding-left: 15rem;
-  font-size: 6.2rem;
+  font-size: 6.4rem;
   line-height: 1.3;
 }
 ol.pasos li:last-child { margin-bottom: 0; }
@@ -264,7 +264,7 @@ ol.pasos li::before {
 ol.pasos strong { color: var(--navy); }
 
 /* ---------- Tabla de técnicas ---------- */
-table.tabla { width: 100%; border-collapse: collapse; font-size: 6.2rem; line-height: 1.32; }
+table.tabla { width: 100%; border-collapse: collapse; font-size: 6.4rem; line-height: 1.32; }
 table.tabla th {
   padding: 0 0 2.6rem;
   text-align: left;
@@ -275,7 +275,7 @@ table.tabla th {
   border-bottom: 0.5rem solid var(--navy);
 }
 table.tabla td {
-  padding: 3.4rem 2rem 3.4rem 0;
+  padding: 3.6rem 2rem 3.6rem 0;
   vertical-align: top;
   border-bottom: 0.3rem solid #E3EAF1;
 }
@@ -294,7 +294,7 @@ code {
 .presupuesto { margin-top: 4.6rem; }
 .pres-etq { display: flex; justify-content: space-between; align-items: baseline; font-size: 5.4rem; font-weight: 600; color: var(--texto); }
 .pres-etq b { font-size: 6.4rem; color: var(--navy); }
-.pista { height: 10.5rem; border-radius: 5rem; background: #E4ECF4; overflow: hidden; }
+.pista { height: 11.5rem; border-radius: 5rem; background: #E4ECF4; overflow: hidden; }
 .pista i { display: block; height: 100%; border-radius: 5rem; }
 .presupuesto .pista { margin-top: 2.4rem; }
 .c-pres { background: linear-gradient(90deg, var(--acento), var(--azul)); }
@@ -302,14 +302,14 @@ code {
 
 /* ---------- Línea de tiempo PARE / SIGA ---------- */
 .linea-tiempo { display: block; width: 100%; height: auto; }
-.leyenda { display: flex; flex-wrap: wrap; gap: 3rem 6rem; margin-top: 4rem; font-size: 5rem; color: var(--gris); }
+.leyenda { display: flex; flex-wrap: wrap; gap: 3rem 6rem; margin-top: 4rem; font-size: 5.2rem; color: var(--gris); }
 .leyenda span { display: inline-flex; align-items: center; gap: 2rem; }
 .sw-pare { display: inline-block; width: 7rem; height: 4.4rem; border-radius: 0.8rem; background: var(--pare); }
 .sw-siga { display: inline-block; width: 1.4rem; height: 6.4rem; border-radius: 0.6rem; background: var(--siga); }
 
 /* ---------- Listas con viñeta ---------- */
 ul.lista { margin: 4.6rem 0 0; padding: 0; list-style: none; }
-ul.lista li { position: relative; margin: 0 0 3.6rem; padding-left: 8rem; font-size: 6.2rem; line-height: 1.36; }
+ul.lista li { position: relative; margin: 0 0 3.6rem; padding-left: 8rem; font-size: 6.4rem; line-height: 1.36; }
 ul.lista li:last-child { margin-bottom: 0; }
 ul.lista li::before {
   content: "";
@@ -326,11 +326,11 @@ ul.lista.alerta li::before { background: var(--alerta); }
 /* ---------- Control de trayectoria ---------- */
 .barra {
   display: grid;
-  grid-template-columns: 44rem minmax(0, 1fr) 40rem;
+  grid-template-columns: 46rem minmax(0, 1fr) 42rem;
   align-items: center;
   gap: 3.4rem;
-  margin: 0 0 7rem;
-  font-size: 5.8rem;
+  margin: 0 0 7.5rem;
+  font-size: 6rem;
 }
 .nom { font-weight: 700; color: var(--navy); }
 .val { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -338,10 +338,10 @@ ul.lista.alerta li::before { background: var(--alerta); }
 .c-iz { background: var(--acento); }
 .c-de { background: #6FB7E6; }
 .c-det { background: #8A99AD; }
-.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3.2rem; margin-top: 5rem; }
-.stat { padding: 6rem 2.6rem; border-radius: 2.4rem; background: #F2F6FA; text-align: center; }
-.stat b { display: block; font-size: 11rem; line-height: 1; font-weight: 700; color: var(--navy); }
-.stat span { display: block; margin-top: 2rem; font-size: 5rem; line-height: 1.25; color: var(--gris); }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3.2rem; margin-top: 5.5rem; }
+.stat { padding: 6.5rem 2.6rem; border-radius: 2.4rem; background: #F2F6FA; text-align: center; }
+.stat b { display: block; font-size: 11.5rem; line-height: 1; font-weight: 700; color: var(--navy); }
+.stat span { display: block; margin-top: 2rem; font-size: 5.2rem; line-height: 1.25; color: var(--gris); }
 
 /* ---------- Conclusiones y referencias ---------- */
 .destacado {
@@ -350,15 +350,15 @@ ul.lista.alerta li::before { background: var(--alerta); }
   border-radius: 2.8rem;
   background: linear-gradient(135deg, var(--navy) 0%, var(--azul) 100%);
   color: #fff;
-  font-size: 6.6rem;
+  font-size: 6.8rem;
   font-weight: 600;
   line-height: 1.3;
 }
 .destacado b { color: var(--acento-claro); }
 .qr-fila { display: flex; align-items: center; gap: 6rem; }
-.qr-fila p { margin: 0; font-size: 6.2rem; line-height: 1.38; }
+.qr-fila p { margin: 0; font-size: 6.4rem; line-height: 1.38; }
 .referencias h2 { font-size: 6rem; }
-.referencias ol { margin: 0; padding-left: 6rem; font-size: 5.2rem; line-height: 1.4; color: var(--gris); }
+.referencias ol { margin: 0; padding-left: 6rem; font-size: 5.3rem; line-height: 1.4; color: var(--gris); }
 .referencias li { margin-bottom: 1.8rem; }
 
 /* ---------- Pie ---------- */
@@ -387,7 +387,6 @@ ul.lista.alerta li::before { background: var(--alerta); }
   .columnas { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10rem 14rem 8rem; }
   .columnas > .col:nth-child(3) { grid-column: 1 / -1; }
   .visor img { height: auto; width: 100%; }
-  .ph-diagrama { height: 100rem; }
 }
 @media screen and (max-width: 719px) {
   :root { --u: calc(100vw / 130); }
@@ -401,18 +400,17 @@ ul.lista.alerta li::before { background: var(--alerta); }
   .columnas > .col:nth-child(3) { grid-column: auto; }
   .figura img { height: 110rem; }
   .visor img { height: auto; width: 100%; }
-  .ph-diagrama { height: 80rem; }
   .qr-fila { flex-direction: column; align-items: flex-start; }
   .ph-qr { width: 100%; height: 60rem; }
   .barra { grid-template-columns: 30rem minmax(0, 1fr) 30rem; }
   .pie { height: auto; flex-direction: column; gap: 3rem; padding: 6rem 8rem; text-align: center; }
 }
 
-/* ---------- Impresión: A1 exacto ---------- */
+/* ---------- Impresión: 700 x 900 mm con marco de 20 mm ---------- */
 @media print {
   :root { --u: 1mm; }
   body { background: none; }
-  .poster { box-shadow: none; margin: 0; }
+  .poster { box-shadow: none; margin: 20rem auto; }
 }
 </style>
 </head>
@@ -473,20 +471,95 @@ ul.lista.alerta li::before { background: var(--alerta); }
 
       <article class="tarjeta">
         <h2><span class="num">03</span>Pipeline de visión</h2>
-        <div class="placeholder ph-diagrama">
-          <span class="ph-tag">Placeholder</span>
-          <svg class="ph-icono" viewBox="0 0 120 60" aria-hidden="true">
-            <g fill="none" stroke="#35618C" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-              <rect x="4" y="18" width="28" height="24" rx="5"/>
-              <rect x="46" y="18" width="28" height="24" rx="5"/>
-              <rect x="88" y="18" width="28" height="24" rx="5"/>
-              <path d="M32 30H46M74 30H88"/>
-              <path d="M40 25L46 30L40 35M82 25L88 30L82 35"/>
-            </g>
-          </svg>
-          <div class="ph-titulo">Diagrama del pipeline de visión</div>
-          <div class="ph-texto">Área reservada para la figura del flujo por etapas (SVG o PNG).</div>
-        </div>
+        <svg class="diagrama" viewBox="0 0 600 620" role="img" aria-label="Pipeline de visión: preprocesado del fotograma, carril de la línea, carril de las señales, compositor de seguridad, cola y transporte hacia el mBot">
+          <defs>
+            <marker id="flecha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="11" markerHeight="11" markerUnits="userSpaceOnUse" orient="auto">
+              <path d="M0 0L10 5L0 10Z" fill="#5F6F82"/>
+            </marker>
+          </defs>
+
+          <g class="caja">
+            <rect x="10" y="8" width="580" height="60" rx="12" fill="#0B2545"/>
+            <text x="300" y="34" text-anchor="middle" font-size="22" font-weight="700" fill="#FFFFFF">Preprocesado del fotograma</text>
+            <text x="300" y="55" text-anchor="middle" font-size="17" fill="#BFD7EA">Gauss 5×5 · BGR a HSV · recorte de 2 ROI</text>
+          </g>
+
+          <line class="flecha" x1="150" y1="68" x2="150" y2="84" marker-end="url(#flecha)"/>
+          <line class="flecha" x1="450" y1="68" x2="450" y2="84" marker-end="url(#flecha)"/>
+
+          <g class="caja">
+            <rect x="25" y="84" width="250" height="24" rx="12" fill="#16A6B6"/>
+            <text x="150" y="101" text-anchor="middle" font-size="16" font-weight="700" fill="#FFFFFF">CARRIL DE LA LÍNEA</text>
+          </g>
+          <g class="caja">
+            <rect x="325" y="84" width="250" height="24" rx="12" fill="#1D4E89"/>
+            <text x="450" y="101" text-anchor="middle" font-size="16" font-weight="700" fill="#FFFFFF">CARRIL DE LAS SEÑALES</text>
+          </g>
+
+          <line class="flecha" x1="150" y1="108" x2="150" y2="142" marker-end="url(#flecha)"/>
+          <line class="flecha" x1="450" y1="108" x2="450" y2="142" marker-end="url(#flecha)"/>
+
+          <g class="caja">
+            <rect x="10" y="142" width="280" height="56" rx="10" fill="#FFFFFF" stroke="#16A6B6" stroke-width="2.5"/>
+            <text x="150" y="166" text-anchor="middle" font-size="20" font-weight="700" fill="#0B2545">Umbral HSV de la línea</text>
+            <text x="150" y="186" text-anchor="middle" font-size="17" fill="#5F6F82">V ≤ 110 · apertura y cierre</text>
+          </g>
+          <line class="flecha" x1="150" y1="198" x2="150" y2="214" marker-end="url(#flecha)"/>
+          <g class="caja">
+            <rect x="10" y="214" width="280" height="56" rx="10" fill="#FFFFFF" stroke="#16A6B6" stroke-width="2.5"/>
+            <text x="150" y="238" text-anchor="middle" font-size="20" font-weight="700" fill="#0B2545">Posición lateral</text>
+            <text x="150" y="258" text-anchor="middle" font-size="17" fill="#5F6F82">perfil de columnas · pico</text>
+          </g>
+          <line class="flecha" x1="150" y1="270" x2="150" y2="286" marker-end="url(#flecha)"/>
+          <g class="caja">
+            <rect x="10" y="286" width="280" height="56" rx="10" fill="#FFFFFF" stroke="#16A6B6" stroke-width="2.5"/>
+            <text x="150" y="310" text-anchor="middle" font-size="20" font-weight="700" fill="#0B2545">Control de trayectoria</text>
+            <text x="150" y="330" text-anchor="middle" font-size="17" fill="#5F6F82">zona muerta e histéresis</text>
+          </g>
+
+          <g class="caja">
+            <rect x="310" y="142" width="280" height="56" rx="10" fill="#FFFFFF" stroke="#1D4E89" stroke-width="2.5"/>
+            <text x="450" y="166" text-anchor="middle" font-size="20" font-weight="700" fill="#0B2545">Segmentación por color</text>
+            <text x="450" y="186" text-anchor="middle" font-size="17" fill="#5F6F82">rojo y verde · inRange HSV</text>
+          </g>
+          <line class="flecha" x1="450" y1="198" x2="450" y2="214" marker-end="url(#flecha)"/>
+          <g class="caja">
+            <rect x="310" y="214" width="280" height="56" rx="10" fill="#FFFFFF" stroke="#1D4E89" stroke-width="2.5"/>
+            <text x="450" y="238" text-anchor="middle" font-size="20" font-weight="700" fill="#0B2545">Candidatos a señal</text>
+            <text x="450" y="258" text-anchor="middle" font-size="17" fill="#5F6F82">approxPolyDP · 7–9 vértices</text>
+          </g>
+          <line class="flecha" x1="450" y1="270" x2="450" y2="286" marker-end="url(#flecha)"/>
+          <g class="caja">
+            <rect x="310" y="286" width="280" height="56" rx="10" fill="#FFFFFF" stroke="#1D4E89" stroke-width="2.5"/>
+            <text x="450" y="310" text-anchor="middle" font-size="20" font-weight="700" fill="#0B2545">Confirmación temporal</text>
+            <text x="450" y="330" text-anchor="middle" font-size="17" fill="#5F6F82">N = 3 · tolerancia K = 2</text>
+          </g>
+          <line class="flecha" x1="450" y1="342" x2="450" y2="358" marker-end="url(#flecha)"/>
+          <g class="caja">
+            <rect x="310" y="358" width="280" height="56" rx="10" fill="#FFFFFF" stroke="#1D4E89" stroke-width="2.5"/>
+            <text x="450" y="382" text-anchor="middle" font-size="20" font-weight="700" fill="#0B2545">Máquina de estados</text>
+            <text x="450" y="402" text-anchor="middle" font-size="17" fill="#5F6F82">PARE para T = 3.0 s</text>
+          </g>
+
+          <path class="conexion" d="M150 342V428H300"/>
+          <path class="conexion" d="M450 414V428H300"/>
+          <line class="flecha" x1="300" y1="428" x2="300" y2="446" marker-end="url(#flecha)"/>
+
+          <g class="caja">
+            <rect x="10" y="446" width="580" height="60" rx="12" fill="#FFF6E0" stroke="#E8A317" stroke-width="2.5"/>
+            <text x="300" y="470" text-anchor="middle" font-size="21" font-weight="700" fill="#0B2545">Compositor de seguridad</text>
+            <text x="300" y="493" text-anchor="middle" font-size="17" fill="#5F6F82">veto de la FSM → DETENER · si no, comando del control</text>
+          </g>
+          <line class="flecha" x1="300" y1="506" x2="300" y2="522" marker-end="url(#flecha)"/>
+
+          <g class="caja">
+            <rect x="10" y="522" width="580" height="60" rx="12" fill="#0B2545"/>
+            <text x="300" y="546" text-anchor="middle" font-size="20" font-weight="700" fill="#FFFFFF">Cola no bloqueante → RFCOMM → mBot</text>
+            <text x="300" y="569" text-anchor="middle" font-size="17" fill="#BFD7EA">w avanza · a izquierda · d derecha · x detiene</text>
+          </g>
+
+          <text x="300" y="606" text-anchor="middle" font-size="16" fill="#5F6F82">Cruce de señal: si la señal tapa la línea, el control sigue recto.</text>
+        </svg>
         <ol class="pasos">
           <li><strong>Preprocesado:</strong> Gauss 5&nbsp;×&nbsp;5 y conversión a HSV</li>
           <li><strong>Segmentación:</strong> inRange por color, apertura y cierre</li>
@@ -611,7 +684,7 @@ ul.lista.alerta li::before { background: var(--alerta); }
         <div class="stats">
           <div class="stat"><b>368</b><span>correcciones (AVANZAR ↔ lateral)</span></div>
           <div class="stat"><b>215</b><span>pérdidas de línea</span></div>
-          <div class="stat"><b>59</b><span>recuperaciones registradas</span></div>
+          <div class="stat"><b>59</b><span>recuperaciones exitosas · 343 fallidas</span></div>
         </div>
         <p class="nota-pie">Zona muerta de ±10 % del ancho del fotograma e histéresis de 3 % alrededor del objetivo central.</p>
       </article>
@@ -668,10 +741,11 @@ ul.lista.alerta li::before { background: var(--alerta); }
         <h2><span class="num">11</span>Límites y trabajo pendiente</h2>
         <ul class="lista alerta">
           <li>Sin anotación de referencia: no hay precisión ni recall de PARE y SIGA (criterios SC-001 a SC-003 pendientes).</li>
-          <li>Seguimiento inestable: 215 pérdidas de línea y 59 recuperaciones registradas.</li>
+          <li>Seguimiento inestable: 215 pérdidas de línea; 59 recuperaciones exitosas y 343 fallidas.</li>
           <li>Dos paradas separadas por 4 s podrían ser la misma señal; falta verificarlo con anotación.</li>
           <li>La relación entre el comando y el giro físico depende del montaje: riesgo abierto.</li>
           <li>24.5 FPS frente a 30 FPS objetivo.</li>
+          <li>T&nbsp;=&nbsp;3.0&nbsp;s es provisional (lo fija el docente).</li>
         </ul>
       </article>
 

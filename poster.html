@@ -195,44 +195,10 @@ figcaption { margin-top: 4rem; font-size: 5.3rem; line-height: 1.35; color: var(
 .c-blan { color: #334155; font-weight: 700; }
 .c-gris { color: #6B7280; font-weight: 700; }
 
-/* ---------- Placeholders (áreas vacías etiquetadas) ---------- */
-.placeholder {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3.4rem;
-  padding: 8rem 7rem;
-  text-align: center;
-  color: #35618C;
-  border: 0.6rem dashed #7FA7CF;
-  border-radius: 3.2rem;
-  background:
-    repeating-linear-gradient(135deg, rgba(22, 166, 182, 0.08) 0 3.2rem, rgba(22, 166, 182, 0) 3.2rem 6.4rem),
-    #F6FAFD;
-  outline: 0.5rem solid rgba(22, 166, 182, 0.25);
-  outline-offset: 1.8rem;
-}
-.ph-tag {
-  position: absolute;
-  top: 5rem;
-  left: 5rem;
-  padding: 1.4rem 3.2rem;
-  border-radius: 20rem;
-  background: var(--azul);
-  color: #fff;
-  font-size: 3.8rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-.ph-titulo { font-size: 7rem; font-weight: 700; line-height: 1.15; color: var(--navy); }
+/* ---------- Diagrama del pipeline y QR del video ---------- */
 .diagrama { display: block; width: 100%; height: auto; max-width: 182rem; margin: 0 auto; }
 .diagrama .flecha, .diagrama .conexion { stroke: #5F6F82; stroke-width: 2.4; fill: none; }
-.ph-qr { flex: none; width: 50rem; height: 50rem; padding: 4.5rem 3.5rem 3.5rem; }
-.ph-qrico { width: 21rem; height: 21rem; }
-.ph-qr .ph-titulo { font-size: 5.4rem; }
+.qr-img { flex: none; width: 52rem; height: 52rem; object-fit: contain; border-radius: 1.6rem; background: #fff; border: 0.5rem solid #D8E4EE; box-shadow: 0 0.3rem 1rem rgba(11, 37, 69, 0.12); }
 
 /* ---------- Etapas del pipeline ---------- */
 ol.pasos { margin: 5rem 0 0; padding: 0; list-style: none; counter-reset: paso; }
@@ -401,7 +367,7 @@ ul.lista.alerta li::before { background: var(--alerta); }
   .figura img { height: 110rem; }
   .visor img { height: auto; width: 100%; }
   .qr-fila { flex-direction: column; align-items: flex-start; }
-  .ph-qr { width: 100%; height: 60rem; }
+  .qr-img { width: 100%; height: auto; }
   .barra { grid-template-columns: 30rem minmax(0, 1fr) 30rem; }
   .pie { height: auto; flex-direction: column; gap: 3rem; padding: 6rem 8rem; text-align: center; }
 }
@@ -703,27 +669,8 @@ ul.lista.alerta li::before { background: var(--alerta); }
       <article class="tarjeta">
         <h2><span class="num">09</span>Video de la corrida</h2>
         <div class="qr-fila">
-          <div class="placeholder ph-qr">
-            <span class="ph-tag">Placeholder</span>
-            <svg class="ph-qrico" viewBox="0 0 100 100" aria-hidden="true">
-              <g fill="none" stroke="#35618C" stroke-width="6">
-                <rect x="8" y="8" width="30" height="30"/>
-                <rect x="62" y="8" width="30" height="30"/>
-                <rect x="8" y="62" width="30" height="30"/>
-              </g>
-              <g fill="#35618C">
-                <rect x="19" y="19" width="8" height="8"/>
-                <rect x="73" y="19" width="8" height="8"/>
-                <rect x="19" y="73" width="8" height="8"/>
-                <rect x="62" y="62" width="10" height="10"/>
-                <rect x="78" y="62" width="14" height="6"/>
-                <rect x="62" y="78" width="6" height="14"/>
-                <rect x="74" y="80" width="18" height="12"/>
-              </g>
-            </svg>
-            <div class="ph-titulo">Código QR</div>
-          </div>
-          <p>Escanea el código para ver el video de la corrida. <em>Enlace pendiente de publicar.</em></p>
+          <img class="qr-img" src="assets/qr_drive.png" alt="Código QR para ver el video de la corrida en Google Drive">
+          <p>Escanea el código para ver el video de la corrida en Google Drive.</p>
         </div>
       </article>
 

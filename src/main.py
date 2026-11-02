@@ -46,10 +46,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from src.clasificacion.base import ClasificadorSenales
 from src.transporte.base import Transporte
 from src.transporte.cola import ColaTransporte
 from src.transporte.simulado import TransporteSimulado
 from src.transporte.spp import TransporteSPP
+from src.vision.cadencia_marcha import CadenciaMarcha
 from src.vision.configuracion import (
     ConfiguracionInvalidaError,
     ParametrosConfiguracion,
@@ -384,6 +386,34 @@ def _construir_transporte(nombre: str, params: ParametrosConfiguracion) -> Trans
     if nombre == "spp":
         return TransporteSPP(mac=params.mac_bluetooth, timeout_s=params.timeout_transporte_s)
     raise ConfiguracionInvalidaError("transporte", f"transporte desconocido: {nombre}")
+
+
+def _construir_clasificador(
+    nombre: str,
+    params: ParametrosConfiguracion,
+    modelo: str | None,
+    metadatos: str | None,
+) -> ClasificadorSenales | None:
+    """Crea el clasificador ONNX pedido por ``--clasificador`` (specs/004).
+
+    ``off`` no importa ONNX Runtime ni abre el modelo. ``onnx`` carga el
+    artefacto y aborta con ``ConfiguracionInvalidaError`` si falta o no valida.
+    """
+    if nombre == "off":
+        return None
+    if nombre != "onnx":
+        raise ConfiguracionInvalidaError(
+            "clasificador", f"clasificador desconocido: {nombre}"
+        )
+
+    from src.clasificacion.onnx import ClasificadorONNX
+
+    ruta_modelo = Path(modelo) if modelo else Path(params.ruta_modelo_senales)
+    ruta_metadatos = Path(metadatos) if metadatos else Path(params.ruta_metadatos_senales)
+    try:
+        return ClasificadorONNX(ruta_modelo, ruta_metadatos)
+    except (OSError, ValueError) as error:
+        raise ConfiguracionInvalidaError("clasificador", str(error)) from error
 
 
 class _BombeoTransporte:
@@ -985,14 +1015,16 @@ def _correr(
     metricas_control: MetricasControl,
     mostrar: bool = False,
     rotacion: int | None = None,
+    clasificador: ClasificadorSenales | None = None,
 ) -> MetricasCorrida:
     """Recorre la fuente componiendo pipeline, FSM, control, métricas, transporte
     y —si ``mostrar``— una ventana en vivo con el fotograma anotado."""
-    pipeline = PipelineVision(params)
+    pipeline = PipelineVision(params, clasificador=clasificador)
+    cadencia_marcha = CadenciaMarcha(params) if clasificador is not None else None
     maquina = MaquinaEstados(params, t_inicial=0.0)
     metricas = MetricasCorrida(corrida_id=corrida_id, fuente=fuente)
     #: Una orden cada ``fotogramas_por_orden``: el enlace del robot no admite más.
-    cadencia = max(1, params.fotogramas_por_orden)
+    cadencia_frames = max(1, params.fotogramas_por_orden)
     #: Última orden que salió de verdad hacia el robot. El visor dibuja esta y no
     #: la propuesta del control, porque con la cadencia y la modulación de
     #: intensidad pueden no coincidir en el mismo fotograma.
@@ -1050,6 +1082,11 @@ def _correr(
                     )
 
             metricas.registrar_fotograma(resultado.latencia_ms, t_s)
+            for clasificacion in resultado.clasificaciones_cnn:
+                metricas.registrar_clasificacion(clasificacion)
+            if resultado.rechazadas_cnn:
+                metricas.registrar_rechazos_cnn(resultado.rechazadas_cnn)
+            metricas.registrar_modo_marcha(resultado.modo_marcha)
 
             # Control de trayectoria (feature 002): estimar → decidir → componer
             # con el veredicto de la FSM, y encolar el comando final. El bucle
@@ -1068,14 +1105,48 @@ def _correr(
                     # movimiento que hubiera quedado pendiente.
                     ultima_orden = decision.comando
                     cola.forzar(ultima_orden)
-                elif indice % cadencia == 0:
-                    # Una sola orden por turno de la cadencia. `forzar` reemplaza
-                    # lo pendiente en vez de acumularlo: el robot recibe siempre
-                    # la decisión actual, nunca un atraso.
-                    ultima_orden = _intensidad_de_turno(
-                        decision, resultado.posicion, params, indice // cadencia
-                    )
-                    cola.forzar(ultima_orden)
+                    if cadencia_marcha is not None:
+                        cadencia_marcha.debe_enviar(
+                            ComandoMovimiento.DETENER, resultado.modo_marcha, t_s
+                        )
+                elif cadencia_marcha is None:
+                    if indice % cadencia_frames == 0:
+                        # Camino clásico intacto: una orden por turno.
+                        ultima_orden = _intensidad_de_turno(
+                            decision,
+                            resultado.posicion,
+                            params,
+                            indice // cadencia_frames,
+                        )
+                        cola.forzar(ultima_orden)
+                else:
+                    comando = decision.comando
+                    if comando is ComandoMovimiento.DETENER:
+                        # Cualquier parada (pérdida, fallo seguro) sale ya.
+                        ultima_orden = comando
+                        cola.forzar(comando)
+                        cadencia_marcha.debe_enviar(
+                            comando, resultado.modo_marcha, t_s
+                        )
+                    else:
+                        if comando in (
+                            ComandoMovimiento.IZQUIERDA,
+                            ComandoMovimiento.DERECHA,
+                        ):
+                            if indice % cadencia_frames != 0:
+                                comando = None
+                            else:
+                                comando = _intensidad_de_turno(
+                                    decision,
+                                    resultado.posicion,
+                                    params,
+                                    indice // cadencia_frames,
+                                )
+                        if comando is not None and cadencia_marcha.debe_enviar(
+                            comando, resultado.modo_marcha, t_s
+                        ):
+                            ultima_orden = comando
+                            cola.forzar(comando)
 
             if inicio_parada is None and estado.estado is not EstadoRobot.EN_MARCHA:
                 inicio_parada = t_s
@@ -1197,6 +1268,25 @@ def _parsear_args(argv: Sequence[str] | None) -> argparse.Namespace:
         help="transporte hacia el robot: 'simulado' (por defecto, sin hardware) o 'spp' (RFCOMM real)",
     )
     analizador.add_argument(
+        "--clasificador",
+        choices=("off", "onnx"),
+        default=None,
+        help=(
+            "clasificador CNN de señales: 'off' (por defecto) o 'onnx'. "
+            "Si se omite, usa 'clasificador_habilitado' de la configuración."
+        ),
+    )
+    analizador.add_argument(
+        "--modelo-senales",
+        default=None,
+        help="ruta del modelo ONNX (por defecto: la de config/vision.json)",
+    )
+    analizador.add_argument(
+        "--metadatos-senales",
+        default=None,
+        help="ruta de la metadata del modelo (por defecto: la de config/vision.json)",
+    )
+    analizador.add_argument(
         "--rotar",
         choices=tuple(_ROTACIONES),
         default=_ROTACION_POR_DEFECTO,
@@ -1235,6 +1325,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"[error] {error}", file=sys.stderr)
         return CODIGO_ENTRADA_INVALIDA
 
+    nombre_clasificador = args.clasificador or (
+        "onnx" if params.clasificador_habilitado else "off"
+    )
+    try:
+        clasificador = _construir_clasificador(
+            nombre_clasificador,
+            params,
+            args.modelo_senales,
+            args.metadatos_senales,
+        )
+    except ConfiguracionInvalidaError as error:
+        print(f"[error] {error}", file=sys.stderr)
+        transporte.cerrar()
+        return CODIGO_ENTRADA_INVALIDA
+
     cola = ColaTransporte()
     metricas_control = MetricasControl()
 
@@ -1252,6 +1357,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             metricas_control=metricas_control,
             mostrar=args.mostrar,
             rotacion=_ROTACIONES[args.rotar],
+            clasificador=clasificador,
         )
     except FuenteInvalidaError as error:
         print(f"[error] fuente invalida: {error}", file=sys.stderr)
@@ -1261,6 +1367,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return CODIGO_ENTRADA_INVALIDA
     finally:
         transporte.cerrar()
+        if clasificador is not None:
+            clasificador.cerrar()
 
     try:
         ruta_eventos, ruta_metricas = metricas.exportar(directorio)

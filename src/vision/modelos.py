@@ -25,6 +25,9 @@ __all__ = [
     "CausaComando",
     "CausaTransicion",
     "ClaseSenal",
+    "ClaseSenalExtra",
+    "ClasificacionCNN",
+    "ColorRegion",
     "ComandoMovimiento",
     "DecisionCompuesta",
     "DecisionControl",
@@ -35,10 +38,13 @@ __all__ = [
     "Lado",
     "LadoConocido",
     "MarcadorVisibilidadPlena",
+    "ModoMarcha",
     "Ocurrencia",
     "Parada",
     "PermisoMovimiento",
     "PosicionLinea",
+    "PrediccionSenal",
+    "RegionSenal",
     "ResultadoProcesamiento",
     "ResultadoSegmentacion",
     "SenalConfirmada",
@@ -52,6 +58,29 @@ class ClaseSenal(StrEnum):
 
     PARE = "PARE"
     SIGA = "SIGA"
+
+
+class ClaseSenalExtra(StrEnum):
+    """Señales de la fase CNN que no participan en la FSM PARE/SIGA."""
+
+    ZONA_ESCOLAR = "ZONA ESCOLAR"
+    VELOCIDAD_60 = "VELOCIDAD 60"
+
+
+class ModoMarcha(StrEnum):
+    """Modo de avance que fija la cadencia de los comandos ``w``."""
+
+    SIGA = "SIGA"
+    ZONA_ESCOLAR = "ZONA ESCOLAR"
+    VELOCIDAD_60 = "VELOCIDAD 60"
+
+
+class ColorRegion(StrEnum):
+    """Máscara clásica que originó una propuesta de región."""
+
+    ROJO = "ROJO"
+    VERDE = "VERDE"
+    AMARILLO = "AMARILLO"
 
 
 class EstadoRobot(StrEnum):
@@ -150,6 +179,27 @@ class ResultadoSegmentacion:
 
 
 @dataclass(frozen=True)
+class RegionSenal:
+    """Región candidata propuesta por el localizador clásico (sin clase CNN)."""
+
+    caja_px: tuple[int, int, int, int]
+    centro_px: tuple[int, int]
+    area_px: int
+    area_rel: float
+    n_vertices: int
+    aspecto: float
+    color: ColorRegion = ColorRegion.ROJO
+
+    def __post_init__(self) -> None:
+        _exigir(self.area_px >= 0, "area_px debe ser >= 0")
+        _exigir(self.area_rel >= 0, "area_rel debe ser >= 0")
+        _exigir(self.n_vertices >= 1, "n_vertices debe ser >= 1")
+        ancho, alto = self.caja_px[2], self.caja_px[3]
+        _exigir(ancho > 0 and alto > 0, "la caja debe tener ancho y alto > 0")
+        _exigir(self.aspecto > 0, "aspecto debe ser > 0")
+
+
+@dataclass(frozen=True)
 class CandidatoSenal:
     """Región validada (o descartada) antes de la confirmación temporal."""
 
@@ -162,6 +212,7 @@ class CandidatoSenal:
     aspecto: float
     es_valido: bool
     motivo_invalidez: str | None = None
+    confianza_cnn: float | None = None
 
     def __post_init__(self) -> None:
         _exigir(self.area_px >= 0, "area_px debe ser >= 0")
@@ -170,6 +221,8 @@ class CandidatoSenal:
         ancho, alto = self.caja_px[2], self.caja_px[3]
         _exigir(ancho > 0 and alto > 0, "la caja debe tener ancho y alto > 0")
         _exigir(self.aspecto > 0, "aspecto debe ser > 0")
+        if self.confianza_cnn is not None:
+            _exigir(0.0 <= self.confianza_cnn <= 1.0, "confianza_cnn debe estar en [0, 1]")
         if self.es_valido:
             _exigir(
                 self.motivo_invalidez is None,
@@ -180,6 +233,39 @@ class CandidatoSenal:
                 bool(self.motivo_invalidez),
                 "un candidato inválido debe indicar motivo_invalidez",
             )
+
+
+@dataclass(frozen=True)
+class PrediccionSenal:
+    """Salida del clasificador CNN para un recorte (sin caja)."""
+
+    clase: str
+    confianza: float
+    probabilidades: dict[str, float]
+    clase_senal: ClaseSenal | None = None
+    clase_extra: ClaseSenalExtra | None = None
+
+    def __post_init__(self) -> None:
+        _exigir(bool(self.clase), "clase no puede estar vacía")
+        _exigir(0.0 <= self.confianza <= 1.0, "confianza debe estar en [0, 1]")
+        if self.clase_senal is not None and self.clase_extra is not None:
+            _exigir(False, "una predicción no puede ser PARE/SIGA y extra a la vez")
+        for nombre, valor in self.probabilidades.items():
+            _exigir(bool(nombre), "el nombre de clase no puede estar vacío")
+            _exigir(0.0 <= valor <= 1.0, f"probabilidad fuera de rango para {nombre}")
+
+
+@dataclass(frozen=True)
+class ClasificacionCNN:
+    """Predicción CNN asociada a la región que la originó."""
+
+    prediccion: PrediccionSenal
+    caja_px: tuple[int, int, int, int]
+    centro_px: tuple[int, int]
+
+    def __post_init__(self) -> None:
+        ancho, alto = self.caja_px[2], self.caja_px[3]
+        _exigir(ancho > 0 and alto > 0, "la caja debe tener ancho y alto > 0")
 
 
 @dataclass(frozen=True)
@@ -355,9 +441,13 @@ class ResultadoProcesamiento:
     visibilidad_plena: list[MarcadorVisibilidadPlena] = field(default_factory=list)
     posicion: "PosicionLinea | None" = None
     decision_control: "DecisionControl | None" = None
+    clasificaciones_cnn: list[ClasificacionCNN] = field(default_factory=list)
+    rechazadas_cnn: int = 0
+    modo_marcha: ModoMarcha = ModoMarcha.SIGA
 
     def __post_init__(self) -> None:
         _exigir(self.latencia_ms >= 0, "latencia_ms debe ser >= 0")
+        _exigir(self.rechazadas_cnn >= 0, "rechazadas_cnn debe ser >= 0")
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@
     { "h_min": 170, "h_max": 179, "s_min": 120, "s_max": 255, "v_min": 90, "v_max": 255 }
   ],
   "rango_hsv_verde": { "h_min": 45, "h_max": 85, "s_min": 100, "s_max": 255, "v_min": 70, "v_max": 255 },
+  "rango_hsv_amarillo": { "h_min": 20, "h_max": 35, "s_min": 100, "s_max": 255, "v_min": 80, "v_max": 255 },
   "kernel_morfologico_px": 5,
   "area_minima_rel": 0.001,
   "n_confirmacion": 3,
@@ -33,5 +34,15 @@
   "mac_bluetooth": "00:1B:10:21:2C:1B",
   "timeout_transporte_s": 0.20,
   "fotogramas_por_orden": 6,
-  "invertir_lados": false
+  "invertir_lados": false,
+
+  "clasificador_habilitado": false,
+  "ruta_modelo_senales": "assets/modelos/senales_mobilenet.onnx",
+  "ruta_metadatos_senales": "assets/modelos/senales_mobilenet.json",
+  "umbral_confianza_senal": 0.70,
+  "area_minima_region_senal_rel": 0.0005,
+  "n_confirmacion_extra": 3,
+  "intervalo_siga_s": 1.0,
+  "intervalo_zona_escolar_s": 2.0,
+  "intervalo_velocidad_60_s": 0.5
 }

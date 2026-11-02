@@ -21,6 +21,7 @@ Garantías de contrato (api-pipeline.md):
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -29,25 +30,35 @@ from .compositor import componer
 from .configuracion import ParametrosConfiguracion
 from .control_trayectoria import ControlTrayectoria
 from .deteccion import Detector
+from .localizacion_senales import LocalizadorSenales
 from .modelos import (
     CandidatoSenal,
     CausaComando,
     ClaseSenal,
+    ClaseSenalExtra,
+    ClasificacionCNN,
+    ColorRegion,
     ComandoMovimiento,
     DecisionCompuesta,
     DecisionControl,
     DecisionMovimiento,
     EventoSenal,
     MarcadorVisibilidadPlena,
+    ModoMarcha,
     PermisoMovimiento,
     PosicionLinea,
+    PrediccionSenal,
+    RegionSenal,
     ResultadoProcesamiento,
     SenalConfirmada,
     TipoEvento,
 )
 from .posicion_linea import EstimadorLinea
-from .preprocesamiento import Preprocesador
+from .preprocesamiento import Preprocesador, ResultadoPreprocesamiento
 from .segmentacion import Segmentador
+
+if TYPE_CHECKING:
+    from src.clasificacion.base import ClasificadorSenales
 
 __all__ = [
     "PipelineVision",
@@ -87,7 +98,12 @@ def _sin_confirmacion_atendida(
 class PipelineVision:
     """Pipeline por fotograma: BGR → segmentación, candidatos y confirmación."""
 
-    def __init__(self, params: ParametrosConfiguracion) -> None:
+    def __init__(
+        self,
+        params: ParametrosConfiguracion,
+        clasificador: "ClasificadorSenales | None" = None,
+    ) -> None:
+        self._params = params
         self._preprocesador = Preprocesador(params)
         self._segmentador = Segmentador(params)
         self._extractor_candidatos = ExtractorCandidatos(params)
@@ -102,6 +118,16 @@ class PipelineVision:
             ClaseSenal.PARE: None,
             ClaseSenal.SIGA: None,
         }
+        # Etapa CNN opcional (specs/004): el localizador clásico propone
+        # regiones y el clasificador decide la clase. Sin clasificador, el
+        # camino clásico de 001 queda intacto.
+        self._clasificador = clasificador
+        self._localizador = (
+            LocalizadorSenales(params) if clasificador is not None else None
+        )
+        self._extra_clase: ClaseSenalExtra | None = None
+        self._extra_conteo = 0
+        self._modo_marcha = ModoMarcha.SIGA
 
     def procesar(
         self,
@@ -119,17 +145,27 @@ class PipelineVision:
 
         preprocesado = self._preprocesador.aplicar(imagen_bgr)
         segmentacion = self._segmentador.aplicar(preprocesado)
-        candidatos = self._extractor_candidatos.extraer(
-            mascara_roja=segmentacion.mascara_roja,
-            mascara_verde=segmentacion.mascara_verde,
-            roi_senales_px=segmentacion.roi_senales,
-        )
+        clasificaciones_cnn: list[ClasificacionCNN] = []
+        rechazadas_cnn = 0
+        if self._clasificador is not None:
+            candidatos, clasificaciones_cnn, rechazadas_cnn = self._detectar_con_cnn(
+                preprocesado, imagen_bgr
+            )
+        else:
+            candidatos = self._extractor_candidatos.extraer(
+                mascara_roja=segmentacion.mascara_roja,
+                mascara_verde=segmentacion.mascara_verde,
+                roi_senales_px=segmentacion.roi_senales,
+            )
         deteccion = self._detector.actualizar(
             candidatos,
             indice,
             t_s,
             permitir_rearme=not self._control.rearme_bloqueado,
         )
+        for senal in deteccion.senales_confirmadas:
+            if senal.clase in (ClaseSenal.PARE, ClaseSenal.SIGA):
+                self._modo_marcha = ModoMarcha.SIGA
         visibilidad = self._marcar_visibilidad(candidatos, segmentacion.roi_senales, indice, t_s)
         for clase in deteccion.clases_rearmadas:
             self._visibilidad_plena[clase] = None
@@ -164,6 +200,9 @@ class PipelineVision:
             visibilidad_plena=visibilidad,
             posicion=posicion,
             decision_control=decision_control,
+            clasificaciones_cnn=clasificaciones_cnn,
+            rechazadas_cnn=rechazadas_cnn,
+            modo_marcha=self._modo_marcha,
         )
 
     def componer(
@@ -215,6 +254,123 @@ class PipelineVision:
         """
         self._control.reiniciar()
         self._estimador.reiniciar()
+        self._extra_clase = None
+        self._extra_conteo = 0
+        self._modo_marcha = ModoMarcha.SIGA
+
+    def _detectar_con_cnn(
+        self,
+        pre: ResultadoPreprocesamiento,
+        imagen_bgr: np.ndarray,
+    ) -> tuple[list[CandidatoSenal], list[ClasificacionCNN], int]:
+        """Localiza regiones, las clasifica y construye candidatas PARE/SIGA."""
+        if self._localizador is None or self._clasificador is None:
+            return [], [], 0
+
+        if imagen_bgr is None or imagen_bgr.ndim != 3 or imagen_bgr.size == 0:
+            return [], [], 0
+
+        candidatos: list[CandidatoSenal] = []
+        clasificaciones: list[ClasificacionCNN] = []
+        rechazadas = 0
+        mejor_extra: PrediccionSenal | None = None
+        for region in self._localizador.propuestas(pre):
+            prediccion = self._clasificador.clasificar(imagen_bgr)
+            if prediccion.confianza < self._params.umbral_confianza_senal:
+                rechazadas += 1
+                continue
+            if not self._clase_coherente(region, prediccion):
+                rechazadas += 1
+                continue
+            if prediccion.clase_senal is not None:
+                candidatos.append(self._candidato(region, prediccion))
+                clasificaciones.append(
+                    ClasificacionCNN(
+                        prediccion=prediccion,
+                        caja_px=region.caja_px,
+                        centro_px=region.centro_px,
+                    )
+                )
+            elif prediccion.clase_extra is not None:
+                clasificaciones.append(
+                    ClasificacionCNN(
+                        prediccion=prediccion,
+                        caja_px=region.caja_px,
+                        centro_px=region.centro_px,
+                    )
+                )
+                if mejor_extra is None or prediccion.confianza > mejor_extra.confianza:
+                    mejor_extra = prediccion
+            else:
+                rechazadas += 1
+
+        if mejor_extra is not None and mejor_extra.clase_extra is not None:
+            self._actualizar_extra(mejor_extra.clase_extra)
+        else:
+            self._reset_extra()
+        return candidatos, clasificaciones, rechazadas
+
+    def _clase_coherente(
+        self, region: RegionSenal, prediccion: PrediccionSenal
+    ) -> bool:
+        """La clase de la CNN debe ser coherente con el color y la forma clásicos.
+
+        El color de la máscara restringe la clase posible y el número de vértices
+        descarta manchas que no tienen la forma de la señal. Sin esta compuerta,
+        una mancha verde grande se clasificaba como SIGA y una zona amarilla
+        rectangular como ZONA ESCOLAR en footage sin señales.
+        """
+        objetivo = self._params.vertices_objetivo
+        tolerancia = self._params.tolerancia_vertices
+        octagono = abs(region.n_vertices - objetivo) <= tolerancia
+
+        if prediccion.clase_senal is ClaseSenal.PARE:
+            return region.color is ColorRegion.ROJO and octagono
+        if prediccion.clase_senal is ClaseSenal.SIGA:
+            return region.color is ColorRegion.VERDE and octagono
+        if prediccion.clase_extra is ClaseSenalExtra.ZONA_ESCOLAR:
+            return region.color is ColorRegion.AMARILLO and region.n_vertices >= 5
+        if prediccion.clase_extra is ClaseSenalExtra.VELOCIDAD_60:
+            return region.color is ColorRegion.ROJO and region.n_vertices >= 6
+        return False
+
+    @staticmethod
+    def _candidato(region: RegionSenal, prediccion: PrediccionSenal) -> CandidatoSenal:
+        clase = prediccion.clase_senal
+        if clase is None:
+            raise ValueError("un candidato CNN exige una clase PARE/SIGA")
+        return CandidatoSenal(
+            clase_estimada=clase,
+            centro_px=region.centro_px,
+            area_px=region.area_px,
+            area_rel=region.area_rel,
+            n_vertices=region.n_vertices,
+            caja_px=region.caja_px,
+            aspecto=region.aspecto,
+            es_valido=True,
+            confianza_cnn=prediccion.confianza,
+        )
+
+    def _actualizar_extra(self, clase: ClaseSenalExtra) -> None:
+        """Confirma una clase extra tras ``n_confirmacion_extra`` predicciones."""
+        if clase is self._extra_clase:
+            self._extra_conteo += 1
+        else:
+            self._extra_clase = clase
+            self._extra_conteo = 1
+        if self._extra_conteo >= self._params.n_confirmacion_extra:
+            self._modo_marcha = self._modo_para_extra(clase)
+
+    def _reset_extra(self) -> None:
+        """Rompe la racha de una clase extra; el modo ya confirmado persiste."""
+        self._extra_clase = None
+        self._extra_conteo = 0
+
+    @staticmethod
+    def _modo_para_extra(clase: ClaseSenalExtra) -> ModoMarcha:
+        if clase is ClaseSenalExtra.ZONA_ESCOLAR:
+            return ModoMarcha.ZONA_ESCOLAR
+        return ModoMarcha.VELOCIDAD_60
 
     def _marcar_visibilidad(
         self,

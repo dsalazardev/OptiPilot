@@ -82,6 +82,9 @@ RANGOS_HSV_ROJO_POR_DEFECTO = (
 RANGO_HSV_VERDE_POR_DEFECTO = RangoHSV(
     h_min=45, h_max=85, s_min=100, s_max=255, v_min=70, v_max=255
 )
+RANGO_HSV_AMARILLO_POR_DEFECTO = RangoHSV(
+    h_min=20, h_max=35, s_min=100, s_max=255, v_min=80, v_max=255
+)
 KERNEL_MORFOLOGICO_PX_POR_DEFECTO = 5
 AREA_MINIMA_REL_POR_DEFECTO = 0.001
 N_CONFIRMACION_POR_DEFECTO = 3
@@ -170,6 +173,20 @@ FOTOGRAMAS_POR_ORDEN_POR_DEFECTO = 1
 #: pone a ``true`` y queda corregido sin tocar código ni reinvertir el montaje.
 INVERTIR_LADOS_POR_DEFECTO = False
 
+# --- Clasificador CNN y cadencia por señal (specs/004) ----------------------
+#: Confianza mínima de la CNN para aceptar una predicción.
+UMBRAL_CONFIANZA_SENAL_POR_DEFECTO = 0.70
+#: Área mínima de una región candidata, como fracción del área de roi_senales.
+AREA_MINIMA_REGION_SENAL_REL_POR_DEFECTO = 0.0005
+#: Predicciones consecutivas necesarias para confirmar una clase extra.
+N_CONFIRMACION_EXTRA_POR_DEFECTO = 3
+#: Intervalos de envío de ``w`` según el modo de marcha (segundos).
+INTERVALO_SIGA_S_POR_DEFECTO = 1.0
+INTERVALO_ZONA_ESCOLAR_S_POR_DEFECTO = 2.0
+INTERVALO_VELOCIDAD_60_S_POR_DEFECTO = 0.5
+RUTA_MODELO_SENALES_POR_DEFECTO = "assets/modelos/senales_mobilenet.onnx"
+RUTA_METADATOS_SENALES_POR_DEFECTO = "assets/modelos/senales_mobilenet.json"
+
 # V5: seis pares hexadecimales separados por dos puntos. Se valida al cargar la
 # configuración para que una MAC mal escrita falle en el arranque y no se
 # descubra como un `sendall` que no llega a nadie.
@@ -210,6 +227,16 @@ _CAMPOS_CONOCIDOS = frozenset(
         "timeout_transporte_s",
         "fotogramas_por_orden",
         "invertir_lados",
+        "rango_hsv_amarillo",
+        "clasificador_habilitado",
+        "ruta_modelo_senales",
+        "ruta_metadatos_senales",
+        "umbral_confianza_senal",
+        "area_minima_region_senal_rel",
+        "n_confirmacion_extra",
+        "intervalo_siga_s",
+        "intervalo_zona_escolar_s",
+        "intervalo_velocidad_60_s",
     }
 )
 
@@ -252,10 +279,22 @@ class ParametrosConfiguracion:
     # Ajuste de pista: cadencia de órdenes y sentido de la corrección.
     fotogramas_por_orden: int = FOTOGRAMAS_POR_ORDEN_POR_DEFECTO
     invertir_lados: bool = INVERTIR_LADOS_POR_DEFECTO
+    # Clasificador CNN de señales y cadencia por modo (specs/004).
+    rango_hsv_amarillo: RangoHSV = RANGO_HSV_AMARILLO_POR_DEFECTO
+    clasificador_habilitado: bool = False
+    ruta_modelo_senales: str = RUTA_MODELO_SENALES_POR_DEFECTO
+    ruta_metadatos_senales: str = RUTA_METADATOS_SENALES_POR_DEFECTO
+    umbral_confianza_senal: float = UMBRAL_CONFIANZA_SENAL_POR_DEFECTO
+    area_minima_region_senal_rel: float = AREA_MINIMA_REGION_SENAL_REL_POR_DEFECTO
+    n_confirmacion_extra: int = N_CONFIRMACION_EXTRA_POR_DEFECTO
+    intervalo_siga_s: float = INTERVALO_SIGA_S_POR_DEFECTO
+    intervalo_zona_escolar_s: float = INTERVALO_ZONA_ESCOLAR_S_POR_DEFECTO
+    intervalo_velocidad_60_s: float = INTERVALO_VELOCIDAD_60_S_POR_DEFECTO
 
     def __post_init__(self) -> None:
         _validar(self)
         _validar_control(self)
+        _validar_clasificador(self)
 
     @classmethod
     def por_defecto(cls) -> "ParametrosConfiguracion":
@@ -268,6 +307,7 @@ def _validar(p: ParametrosConfiguracion) -> None:
     _validar_rectangulo("roi_senales", p.roi_senales)
     _validar_rango("rango_hsv_linea", p.rango_hsv_linea)
     _validar_rango("rango_hsv_verde", p.rango_hsv_verde)
+    _validar_rango("rango_hsv_amarillo", p.rango_hsv_amarillo)
 
     if len(p.rangos_hsv_rojo) != 2:
         raise ConfiguracionInvalidaError(
@@ -285,6 +325,16 @@ def _validar(p: ParametrosConfiguracion) -> None:
                 "rango_hsv_verde",
                 f"el tono del verde se solapa con rangos_hsv_rojo[{indice}]: señales ambiguas",
             )
+        if rango.solapa_tono(p.rango_hsv_amarillo):
+            raise ConfiguracionInvalidaError(
+                "rango_hsv_amarillo",
+                f"el tono del amarillo se solapa con rangos_hsv_rojo[{indice}]: señales ambiguas",
+            )
+    if p.rango_hsv_verde.solapa_tono(p.rango_hsv_amarillo):
+        raise ConfiguracionInvalidaError(
+            "rango_hsv_amarillo",
+            "el tono del amarillo se solapa con el verde: señales ambiguas",
+        )
 
     if p.kernel_morfologico_px < 3 or p.kernel_morfologico_px % 2 == 0:
         raise ConfiguracionInvalidaError(
@@ -394,6 +444,36 @@ def _validar_control(p: ParametrosConfiguracion) -> None:
     if p.fotogramas_por_orden < 1:
         raise ConfiguracionInvalidaError(
             "fotogramas_por_orden", "debe ser >= 1 (una orden cada N fotogramas)"
+        )
+
+
+def _validar_clasificador(p: ParametrosConfiguracion) -> None:
+    """Reglas del clasificador CNN y de la cadencia por señal (specs/004)."""
+    if not 0.0 <= p.umbral_confianza_senal <= 1.0:
+        raise ConfiguracionInvalidaError(
+            "umbral_confianza_senal", "debe estar en [0, 1]"
+        )
+    if not 0.0 < p.area_minima_region_senal_rel < 1.0:
+        raise ConfiguracionInvalidaError(
+            "area_minima_region_senal_rel",
+            "debe estar en (0, 1) como fracción del área de roi_senales",
+        )
+    if p.n_confirmacion_extra < 1:
+        raise ConfiguracionInvalidaError("n_confirmacion_extra", "debe ser >= 1")
+    for campo, valor in (
+        ("intervalo_siga_s", p.intervalo_siga_s),
+        ("intervalo_zona_escolar_s", p.intervalo_zona_escolar_s),
+        ("intervalo_velocidad_60_s", p.intervalo_velocidad_60_s),
+    ):
+        if valor <= 0.0:
+            raise ConfiguracionInvalidaError(campo, "debe ser > 0")
+    if not p.ruta_modelo_senales:
+        raise ConfiguracionInvalidaError(
+            "ruta_modelo_senales", "no puede estar vacía"
+        )
+    if not p.ruta_metadatos_senales:
+        raise ConfiguracionInvalidaError(
+            "ruta_metadatos_senales", "no puede estar vacía"
         )
 
 
@@ -602,6 +682,38 @@ def _fusionar(datos: Mapping[str, Any]) -> ParametrosConfiguracion:
         datos, "fotogramas_por_orden", defecto.fotogramas_por_orden
     ),
     invertir_lados=_leer_booleano(datos, "invertir_lados", defecto.invertir_lados),
+    rango_hsv_amarillo=_leer_rango(
+        datos, "rango_hsv_amarillo", defecto.rango_hsv_amarillo
+    ),
+    clasificador_habilitado=_leer_booleano(
+        datos, "clasificador_habilitado", defecto.clasificador_habilitado
+    ),
+    ruta_modelo_senales=_leer_texto(
+        datos, "ruta_modelo_senales", defecto.ruta_modelo_senales
+    ),
+    ruta_metadatos_senales=_leer_texto(
+        datos, "ruta_metadatos_senales", defecto.ruta_metadatos_senales
+    ),
+    umbral_confianza_senal=_leer_numero(
+        datos, "umbral_confianza_senal", defecto.umbral_confianza_senal
+    ),
+    area_minima_region_senal_rel=_leer_numero(
+        datos,
+        "area_minima_region_senal_rel",
+        defecto.area_minima_region_senal_rel,
+    ),
+    n_confirmacion_extra=_leer_entero(
+        datos, "n_confirmacion_extra", defecto.n_confirmacion_extra
+    ),
+    intervalo_siga_s=_leer_numero(
+        datos, "intervalo_siga_s", defecto.intervalo_siga_s
+    ),
+    intervalo_zona_escolar_s=_leer_numero(
+        datos, "intervalo_zona_escolar_s", defecto.intervalo_zona_escolar_s
+    ),
+    intervalo_velocidad_60_s=_leer_numero(
+        datos, "intervalo_velocidad_60_s", defecto.intervalo_velocidad_60_s
+    ),
     )
 
 

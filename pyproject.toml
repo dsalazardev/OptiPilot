@@ -5,6 +5,9 @@ requires-python = ">=3.14"
 dependencies = [
     "numpy>=2.4",
     "opencv-python-headless>=4.13",
+    # Runtime de la CNN de señales. Se usa ONNX en lugar de TensorFlow porque
+    # TensorFlow 2.21 no publica wheel cp314 para Windows.
+    "onnxruntime>=1.31",
     # El canal Bluetooth Classic hacia el mBot usa sockets RFCOMM de la
     # biblioteca estándar (`socket.AF_BLUETOOTH`), así que no hace falta ninguna
     # dependencia de terceros. Se retiró `pyserial` cuando el profesor confirmó
@@ -25,4 +28,5 @@ testpaths = ["tests"]
 markers = [
     "footage: validación con footage real (opt-in vía OPTIPILOT_VIDEO_DIR)",
     "perf: benchmark de latencia (no bloqueante)",
+    "cnn: smoke test con el modelo ONNX real (opt-in)",
 ]

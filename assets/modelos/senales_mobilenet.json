@@ -1,0 +1,23 @@
+{
+  "modelo": "MobileNet",
+  "archivo_origen": "modelos_guardados\\MobileNet.keras",
+  "archivo_onnx": "senales_mobilenet.onnx",
+  "opset": 13,
+  "tamano_entrada": [
+    224,
+    224
+  ],
+  "canal": "RGB",
+  "preproceso": "mobilenet_tf",
+  "escala": "[-1, 1]",
+  "clases": {
+    "0": "PARE",
+    "1": "SIGA",
+    "2": "ZONA ESCOLAR",
+    "3": "VELOCIDAD 60"
+  },
+  "paridad_diferencia_maxima": 5.364418029785156e-07,
+  "paridad_aciertos": 12,
+  "paridad_muestras": 12,
+  "sha256": "40ae3c39c98980f690add1c0820d9a16bd4f1853b2c22132f3960ffd57212c73"
+}

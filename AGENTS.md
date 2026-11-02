@@ -3,8 +3,8 @@
 **Bootstrap and operating manual for AI agents working in this repository.**
 
 - **Generated:** 2026-09-22 (de una inspección de solo lectura del repositorio).
-- **Última actualización:** 2026-09-28, tercera pasada del mismo día. La anterior registró el **cambio de protocolo de transporte** ordenado por el profesor; esta cierra la feature 002 (transporte, compositor, cola, métricas, cableado e integración) con la app lista para la pista.
-- **Basis:** rama `feature/002-control-trayectoria`. Commits: `b2ea2f5` (spec 002), `3ddee48` (US1, estimador), `8341f04` (US2/US3, control), `8647132` (compositor + spp ASCII). La cola de transporte, las métricas de control, el cableado de `main.py` y los tests de integración/footage están **sin commitear**.
+- **Última actualización:** 2026-11-02. Se implementó la **feature 004** (clasificador CNN opcional de 4 señales con ONNX Runtime y cadencia PARE/SIGA/ZONA/VELOCIDAD), se exportó el modelo a `assets/modelos/`, se añadieron 16 tests y la suite quedó en **538 passed, 12 skipped**.
+- **Basis:** rama `main` (sin rama nueva). La feature 004 está documentada en `specs/004-clasificador-senales-cnn/`; no se ha validado en el robot físico.
 - **Language:** este documento está en inglés (estándar para archivos bootstrap de agentes); el material de origen del proyecto está en español. Conserva en español los términos del dominio: *Reto 1, PARE, SIGA, rúbrica, descarrilamiento*.
 
 ---
@@ -25,9 +25,10 @@ Read order for a new agent joining this project:
 Re-verification quick commands (run from the repo root):
 
 ```bash
-git rev-parse --abbrev-ref HEAD   # expect: feature/002-control-trayectoria
+git rev-parse --abbrev-ref HEAD   # expect: main
 git status --short                # working tree state
-uv run pytest -q                  # full suite (428 passed, 12 skipped)
+uv run pytest -q                  # full suite (538 passed, 12 skipped)
+uv run pytest -m cnn -q           # smoke test del modelo ONNX real
 openspec list --json              # active OpenSpec changes
 openspec --version                # CLI version
 ```
@@ -38,7 +39,7 @@ openspec --version                # CLI version
 
 **OptiPilot** is the working name (appears only in `pyproject.toml` and `.idea/optipilot.iml`; there is no README) of an academic software project whose goal is the **"Reto 1" of a computer-vision course at Universidad de Caldas**: the *brain* of an autonomous line-following robot that uses a camera, classical image processing only, and must react to two traffic signs (red octagon = **PARE** / stop; green octagon = **SIGA** / go).
 
-**Current reality (do not skip):** the repository contains **a working, tested implementation** of the vision pipeline, the deterministic state machine, run metrics, a validation CLI, trajectory control, the safety compositor, the transport queue, and 428 automated tests. What does **not** exist yet: the annotated reference corpus needed to score SC-010, the teacher's stop duration, the poster, and validation against the real robot (the RFCOMM link has never run on hardware).
+**Current reality (do not skip):** the repository contains **a working, tested implementation** of the vision pipeline, the deterministic state machine, run metrics, a validation CLI, trajectory control, the safety compositor, the transport queue, an **optional CNN classifier (feature 004)** with ONNX Runtime, and **538 automated tests**. What does **not** exist yet: the annotated reference corpus needed to score SC-010, validation of the CNN on the real robot camera, and validation against the physical robot (the RFCOMM link has never run on hardware).
 
 **Status snapshot**
 
@@ -48,15 +49,17 @@ openspec --version                # CLI version
 | CV pipeline (preprocess → segment → candidates → confirm) | **Implemented** | `src/vision/{preprocesamiento,segmentacion,candidatos,deteccion,pipeline}.py` |
 | Deterministic FSM (PARE stops, SIGA resumes) | **Implemented** | `src/vision/maquina_estados.py` |
 | Run metrics + visualization + validation CLI | **Implemented** | `src/vision/metricas.py`, `visualizacion.py`, `src/main.py` |
-| Tests | **Present** — 428 passing (342 unit, 86 integration) | `tests/unit/`, `tests/integration/` |
+| Optional CNN classifier (4 signals) | **Implemented** — ONNX Runtime, optional `--clasificador onnx` | `src/clasificacion/`, `src/vision/localizacion_senales.py`, `assets/modelos/` |
+| Cadence PARE/SIGA/ZONA/VELOCIDAD | **Implemented** — PARE 3.0 s, SIGA 1.0 s, ZONA 2.0 s, VELOCIDAD 0.5 s | `src/vision/cadencia_marcha.py`, `src/main.py` |
+| Tests | **Present** — 538 passing (441 unit, 97 integration) + 12 skipped | `tests/unit/`, `tests/integration/` |
 | Reference annotation corpus (SC-010 ground truth) | **Absent** — required by `contracts/anotacion-referencia.md` §2 | no `anotacion_linea.json` in the repo |
-| Real footage | **Absent in this copy** — was never tracked (`.gitignore:180` ignores `videos/`); 9 portrait 478×850 videos documented but not present | no `documents/videos/` on disk |
-| Signal detection on real footage | **Not demonstrated** — 0 confirmations observed | see §27 |
+| Real footage | **Present locally, untracked** — 9 portrait 478×850 videos (`.gitignore` ignores `videos/`) | `videos/` on disk, not in git |
+| Signal detection on real footage | **Classical detector: not demonstrated** (0 confirmations). **CNN: 0 false PARE/SIGA/extra on 1369 sampled frames** | §27.11, §27.21 |
 | Bluetooth link to the mBot (US4) | **Partially implemented** — `TransporteSPP` sends one ASCII byte over RFCOMM; never run against real hardware | `src/transporte/spp.py` |
-| `ColaTransporte` / `TransporteSimulado` | **Absent** — T027, T028, T030 pending | no `src/transporte/{cola,simulado}.py` |
+| `ColaTransporte` / `TransporteSimulado` | **Implemented** | `src/transporte/{cola,simulado}.py` |
 | CI/CD for the product | Absent; 1 generated Copilot-setup workflow | `.github/workflows/copilot-setup-steps.yml` |
-| Python environment | Complete: CPython 3.14 + OpenCV + NumPy + pytest, **zero third-party deps for the robot link** | `.venv/`, `pyproject.toml` |
-| Git | Feature 002 on `feature/002-control-trayectoria`; `main`/`dev` still at Fase 2 | `git log`, `git branch -av` |
+| Python environment | CPython 3.14 + OpenCV + NumPy + pytest + `onnxruntime`; robot link still has zero third-party deps | `.venv/`, `pyproject.toml` |
+| Git | `main` (feature 004 implemented, no new branch); OpenSpec idle | `git log`, `git branch -av` |
 
 ---
 
@@ -128,7 +131,7 @@ Sources (equivalent content; verified line-by-line against each other): `documen
 Classification of everything in the repo (the distinction between documentation and implementation is critical here):
 
 **Implemented**
-- Git repository; feature 002 work on branch `feature/002-control-trayectoria` (`origin/main` remains at Fase 2).
+- Git repository; feature 004 work on `main` (no new branch).
 - PyCharm project files (`.idea/**`).
 - Spec Kit installation (`.specify/**`, 21 tracked files) — the tool that produced `specs/**`.
 - OpenSpec initialization (`openspec/config.yaml`; `specs/` and `changes/archive/` empty with `.gitkeep`).
@@ -145,18 +148,22 @@ Classification of everything in the repo (the distinction between documentation 
   - `control_trayectoria.py` — bang-bang with hysteresis, recovery, safe fallback (002/US2-3).
   - `compositor.py` — 3-level safety arbitration; FSM veto always ⟹ `DETENER` (T025).
   - `metricas.py` / `visualizacion.py` — run metrics and annotated frames (T020–T021).
+  - `localizacion_senales.py` — propuestas clásicas rojo/verde/amarillo con contornos, color de origen e IoU (004).
+  - `cadencia_marcha.py` — intervalos de `w` por modo de marcha (004).
+- **CNN classifier (optional)** in `src/clasificacion/`: `base.py` (`Protocol ClasificadorSenales`), `onnx.py` (`ClasificadorONNX`, the only model I/O boundary), plus `assets/modelos/senales_mobilenet.onnx` + metadata. The pipeline uses it only with `--clasificador onnx`; `off` keeps the classical path.
 - **Transport link** in `src/transporte/`: `base.py` (`Protocol Transporte`, no I/O), `spp.py` (`TransporteSPP`, one ASCII byte per command over RFCOMM; the only file that opens a socket), `simulado.py` (`TransporteSimulado`, test double) and `cola.py` (`ColaTransporte`, the decoupling queue). The CLI wires them via `--transporte {simulado,spp}` and drains in a background thread.
-- Control metrics (`MetricasControl` in `metricas.py`) and the control evidence in `visualizacion.py`.
+- Control metrics (`MetricasControl` in `metricas.py`), CNN metrics (`clasificaciones_cnn`, `predicciones_rechazadas_cnn`, `modo_marcha`) and the control evidence in `visualizacion.py`.
 - Configuration in `config/vision.json`, validated on load by `configuracion.py`.
-- Validation CLI `src/main.py` (`--fuente`, `--config`, `--diagnostico`, `--salida`, `--max-fotogramas`, `--anotacion`).
-- 428 automated tests: 342 unit (`tests/unit/`) + 86 integration (`tests/integration/`).
+- Validation CLI `src/main.py` (`--fuente`, `--config`, `--diagnostico`, `--salida`, `--max-fotogramas`, `--anotacion`, `--clasificador`, `--modelo-senales`, `--metadatos-senales`).
+- 538 automated tests: 441 unit (`tests/unit/`) + 97 integration (`tests/integration/`) + 12 skipped.
 
 **Documented but NOT implemented** (the robot/actuator boundary)
 - Any camera capture on the real robot (the CLI opens files/indices; the camera is untested).
 - Motor/actuator control: the FSM emits `DecisionMovimiento` *verdicts*, nothing drives wheels.
 - The annotated reference corpus (`anotacion_linea.json` + PNG masks) for SC-010.
 - The poster / visual material.
-- PARE stop duration is provisional (`t_parada_s: 3.0`), pending the teacher's value.
+- Validation of the CNN on the real robot camera and the cadence on physical hardware.
+- PARE stop duration is `3.0 s` by request for the CNN phase; the original Reto 1 value from the teacher is still not confirmed.
 
 **Planned / configured**
 - Spec Kit (`.specify/`, workflow `speckit`) is the tool that carried the work; OpenSpec is initialized but idle (no changes, no specs).
@@ -222,10 +229,12 @@ Missing on purpose/absence: no `README*`, no `LICENSE`, no `CONTRIBUTING`, no pr
 |-------|----------------------|----------|
 | Language | Python — declared `>=3.14` | `pyproject.toml` → `requires-python` |
 | Local runtime | CPython **3.14.7**, uv-managed venv | `.venv/pyvenv.cfg`, `.venv/Scripts/python.exe --version` |
-| Dependency management | Declared: `numpy>=2.4`, `opencv-python-headless>=4.13`; dev group: `pytest>=8`. `pyserial` was added then **removed** within the same day when the real protocol turned out to be RFCOMM | `pyproject.toml`, `uv.lock` |
+| Dependency management | Declared: `numpy>=2.4`, `opencv-python-headless>=4.13`, `onnxruntime>=1.31`; dev group: `pytest>=8`. `pyserial` was added then **removed** when the real protocol turned out to be RFCOMM | `pyproject.toml`, `uv.lock` |
 | Computer vision | **OpenCV** (`opencv-python-headless`) — `cvtColor`, `inRange`, `morphologyEx`, `findContours`, `approxPolyDP`, `arcLength`, `boundingRect`, `VideoCapture`, `imwrite` | `src/vision/**`, `src/main.py` |
+| CNN runtime | **ONNX Runtime 1.31.1** on Python 3.14; `MobileNet` exported to `assets/modelos/senales_mobilenet.onnx` (12.25 MB); 4 intra-op threads (10.6 ms mean, 13.6 ms p95) | `src/clasificacion/onnx.py`, `assets/modelos/` |
+| CNN training (external) | `optipilot_classifier` on Python 3.13 with TensorFlow 2.21 / Keras 3.15; not a runtime dependency | external project |
 | Numerics | NumPy — masks as boolean/uint8 arrays, ROI boolean algebra | `src/vision/**` |
-| Tests | pytest with two custom markers: `footage` (opt-in real video) and `perf` (benchmark) | `pyproject.toml` → `[tool.pytest.ini_options]` |
+| Tests | pytest with three custom markers: `footage` (opt-in real video), `perf` (benchmark), `cnn` (real ONNX smoke test) | `pyproject.toml` → `[tool.pytest.ini_options]` |
 | Agent/workflow tooling | OpenSpec CLI **1.13.1** (`npm install -g @fission-ai/openspec`); generated files stamped `generatedBy: "1.13.1"` | CLI output, skill frontmatter, `.github/workflows/copilot-setup-steps.yml` |
 | IDE | PyCharm (project SDK pinned to the local `.venv`) | `.idea/` |
 | VCS | Git, branches `main` and `dev`, remote GitHub `dsalazardev/OptiPilot` | `git remote -v`, `git log` |
@@ -237,7 +246,7 @@ No build system beyond setuptools defaults; no formatter/linter configured (see 
 
 ## 8. Architecture and Application Flow
 
-**Actual architecture: a linear stage pipeline, not a layered one.** `src/vision/` is the real package; its modules correspond one-to-one to the stages of Reto 1 and are wired in order by `PipelineVision`. `src/transporte/` is a second, deliberately separate package: it is the only place allowed to touch the network. `src/models/` and `src/services/` remain 0-byte package markers and are **not** part of the design.
+**Actual architecture: a linear stage pipeline, not a layered one.** `src/vision/` is the real package; its modules correspond one-to-one to the stages of Reto 1 and are wired in order by `PipelineVision`. `src/clasificacion/` is the optional CNN runtime boundary (ONNX I/O); `src/transporte/` is the only package allowed to touch the network. `src/models/` and `src/services/` remain 0-byte package markers and are **not** part of the design.
 
 **Actual application flow: implemented as a validation CLI, not as a robot controller.** The stages run per frame:
 
@@ -248,13 +257,19 @@ frame (video / directory / camera index)
    │
    ▼ Segmentador      inRange HSV (línea, rojo, verde) → open+close → máscaras
    │
-   ▼ ExtractorCandidatos  findContours → area/aspecto → approxPolyDP (8±1 vértices)
+   ├─ (--clasificador off, default) ExtractorCandidatos → octágono 8±1
+   └─ (--clasificador onnx) LocalizadorSenales (rojo/verde/amarillo)
+                              → ClasificadorONNX (contexto del frame)
+                              → PARE/SIGA + clases extra
    │
    ▼ Confirmador      N=3 consecutive, tolerancia K=2, re-arm tras x_rearme
    │
    ▼ MaquinaEstados   SIGA → PERMITIR · PARE → DETENIDO (durante T) → SIGA → reanudar
    │
-   ├─▶ MetricasCorrida    eventos, decisiones, tiempos → metricas.json
+   ▼ ControlTrayectoria → compositor → CadenciaMarcha (solo con onnx)
+   │                                      SIGA 1.0 s · ZONA 2.0 s · VELOCIDAD 0.5 s
+   │
+   ├─▶ MetricasCorrida    eventos, decisiones, tiempos, CNN → metricas.json
    └─▶ Visualizador       frames anotados (--diagnostico) → SC-012
 ```
 
@@ -341,7 +356,11 @@ The rubric makes violating this a **"No cumple"** in *Cumplimiento de las restri
 | `src/vision/posicion_linea.py` | `EstimadorLinea.aplicar` — band, dominant peak, anticipation fraction | **Implemented** (T013) |
 | `src/vision/control_trayectoria.py` | `ControlTrayectoria.decidir` — bang-bang with hysteresis, recovery, safe fallback | **Implemented** (T017) |
 | `src/vision/compositor.py` | `componer` — 3-level safety arbitration; FSM veto always ⟹ `DETENER` | **Implemented** (T025) |
-| `src/vision/modelos.py` | Shared dataclasses/enums: `EstadoRobot`, `PermisoMovimiento`, `ClaseSenal`, `EventoDeteccion`, plus the 002 control block | **Implemented** |
+| `src/vision/modelos.py` | Shared dataclasses/enums: `EstadoRobot`, `PermisoMovimiento`, `ClaseSenal`, `EventoDeteccion`, the 002 control block, plus `ClaseSenalExtra`, `ModoMarcha`, `ColorRegion`, `PrediccionSenal`, `RegionSenal`, `ClasificacionCNN` (004) | **Implemented** |
+| `src/vision/localizacion_senales.py` | `LocalizadorSenales` — red/green/yellow masks, contours, area/aspect, origin color, IoU suppression (004) | **Implemented** |
+| `src/vision/cadencia_marcha.py` | `CadenciaMarcha` — `w` intervals per march mode, reset, immediate first `w` (004) | **Implemented** |
+| `src/clasificacion/base.py` | `Protocol ClasificadorSenales` (no I/O) | **Implemented** (004) |
+| `src/clasificacion/onnx.py` | `ClasificadorONNX` — the only ONNX model I/O boundary; metadata/hash validation, MobileNet preprocessing, 4 threads | **Implemented** (004) |
 | `src/transporte/base.py` | `Protocol Transporte` (no I/O): `enviar`, `cerrar`, `conectado`, `ultimo_error` | **Implemented** (T030 prerequisite) |
 | `src/transporte/spp.py` | `TransporteSPP` — **the only file in the project that opens a socket**; one ASCII byte per command over RFCOMM | **Implemented** (T029) |
 | `src/transporte/simulado.py` | `TransporteSimulado` — in-memory test double with `historial()` and `fallar_con(n)` | **Implemented** (T028) |
@@ -425,7 +444,7 @@ All four are **class materials authored for Google Colab** (embedded outputs and
   testpaths = ["tests"]
   markers = ["footage: ...", "perf: ..."]
   ```
-- **`config/vision.json`**: the runtime configuration consumed by `configuracion.py` — both ROIs, the HSV ranges for line/red/green, morphology kernel, area minimum, `n_confirmacion`/`k_tolerancia`/`x_rearme`, `t_parada_s`, the latency budget, the shape filters (`vertices_objetivo`, `tolerancia_vertices`, `aspecto_min`/`aspecto_max`), and the control block: `x_objetivo`, `frac_anticipacion`, `frac_pico`, `umbral_confianza`, `zona_muerta`, `histerecis`, `n_gracia_busqueda`, `mac_bluetooth`, `timeout_transporte_s`. Loaded and validated on every run; a malformed value raises `ConfiguracionInvalidaError`. V5 validates the MAC format `XX:XX:XX:XX:XX:XX`; V6 validates the transport timeout.
+- **`config/vision.json`**: the runtime configuration consumed by `configuracion.py` — both ROIs, the HSV ranges for line/red/green/yellow, morphology kernel, area minimum, `n_confirmacion`/`k_tolerancia`/`x_rearme`, `t_parada_s`, the latency budget, the shape filters (`vertices_objetivo`, `tolerancia_vertices`, `aspecto_min`/`aspecto_max`), the control block (`x_objetivo`, `frac_anticipacion`, `frac_pico`, `umbral_confianza`, `zona_muerta`, `histeresis`, `n_gracia_busqueda`, `mac_bluetooth`, `timeout_transporte_s`), and the CNN/cadence block (`clasificador_habilitado`, `ruta_modelo_senales`, `ruta_metadatos_senales`, `umbral_confianza_senal`, `area_minima_region_senal_rel`, `n_confirmacion_extra`, `intervalo_siga_s`, `intervalo_zona_escolar_s`, `intervalo_velocidad_60_s`). Loaded and validated on every run; a malformed value raises `ConfiguracionInvalidaError`. V5 validates the MAC format `XX:XX:XX:XX:XX:XX`; V6 validates the transport timeout.
 - **`openspec/config.yaml`**: `schema: spec-driven`; `githubCopilot.cloudAgent: true`. Everything else (context, rules, operations) is **commented-out examples only** — the project has not filled in its OpenSpec context yet. This is the natural place to declare project context for OpenSpec workflows (a change, if done).
 - **`.gitignore`**: Toptal "python" template. Ignores `.venv`, `.env`, `__pycache__/`, `.ipynb_checkpoints`, `.ruff_cache/`, `pyrightconfig.json`, coverage artefacts, etc. `.idea/` is **not** ignored (the line is commented) and IDE files are deliberately tracked, except `.idea/workspace.xml` which is excluded by `.idea/.gitignore`.
 - **No `.env`.** The only environment variable the project reads is `OPTIPILOT_VIDEO_DIR`, and only in the `footage`-marked test (T027); there is no dotenv machinery. If a future stage needs env vars for the product itself, that is a new decision — document it. `uv.lock` **does** exist and is committed, so the environment is reproducible with `uv sync`.
@@ -468,13 +487,15 @@ Changed together (config + code default + tests must stay in sync):
 | Purpose | Command | Source of truth |
 |---|---|---|
 | Sync the environment from the manifest | `uv sync` | `pyproject.toml` |
-| Full test suite | `uv run pytest -q` | verified: **382 passed, 5 skipped** |
-| Unit tests only | `uv run pytest tests/unit -q` | verified |
-| Integration tests only | `uv run pytest tests/integration -q` | verified |
+| Full test suite | `uv run pytest -q` | verified: **538 passed, 12 skipped** |
+| Unit tests only | `uv run pytest tests/unit -q` | verified: 441 passed |
+| Integration tests only | `uv run pytest tests/integration -q` | verified: 97 passed, 12 skipped |
 | Run with real footage (opt-in) | `OPTIPILOT_VIDEO_DIR=<dir> uv run pytest -m footage` | `tests/integration/test_footage_linea.py` |
 | Benchmark suite (opt-in) | `uv run pytest -m perf` | `tests/integration/test_rendimiento.py` |
+| CNN smoke test (real ONNX) | `uv run pytest -m cnn -q` | `tests/integration/test_clasificador_cnn_real.py` |
 | Run the validation CLI | `uv run python -m src.main --fuente <ruta>` | `src/main.py` |
 | Run against the real robot link | `uv run python -m src.main --fuente <ruta> --transporte spp` | `src/main.py` (default is `simulado`; no hardware needed) |
+| Run with the CNN classifier | `uv run python -m src.main --fuente <ruta> --clasificador onnx --transporte spp` | `src/main.py` (requires `assets/modelos/senales_mobilenet.onnx`) |
 | Write annotated frames | `uv run python -m src.main --fuente <ruta> --diagnostico` | `src/main.py` |
 | Verify OpenSpec CLI | `openspec --version` | `.github/agents/openspec.agent.md` |
 | Install OpenSpec CLI (if missing) | `npm install -g @fission-ai/openspec` | `.github/workflows/copilot-setup-steps.yml` |
@@ -488,12 +509,13 @@ Changed together (config + code default + tests must stay in sync):
 
 ## 18. Testing
 
-- **428 tests pass** (342 unit + 86 integration) plus 12 opt-in skips. Command: `uv run pytest -q`.
-- Layout: `tests/unit/` (12 files, pure logic — no image fixtures), `tests/integration/` (7 test files + `_escenarios.py` helper that replays the production loop `PipelineVision → MaquinaEstados`).
-- Shared synthetic frame generator: `tests/fixtures/generador_sintetico.py` (background, vertical line, octagons, gaussian noise). Fixtures were written to draw 640×480 landscape frames, matching the documented target resolution — the real footage (478×850 portrait, absent in this copy; §27.14) would exercise **different geometries**.
-- Two custom markers in `pyproject.toml`:
-  - `footage` — opt-in real-video validation. Requires `OPTIPILOT_VIDEO_DIR`; **skips cleanly** when unset or when the corpus has no `anotacion_linea.json` (T027). The line-IoU path has therefore been exercised against a synthetic annotated corpus, not yet against real annotation.
+- **538 tests pass** (441 unit + 97 integration) plus 12 opt-in skips. Command: `uv run pytest -q`.
+- Layout: `tests/unit/` (pure logic — no image fixtures), `tests/integration/` (production-loop helpers + CNN integration/smoke tests).
+- Shared synthetic frame generator: `tests/fixtures/generador_sintetico.py` (background, vertical line, octagons, gaussian noise). Fixtures draw 640×480 landscape frames; the real footage (478×850 portrait, present locally but untracked; §27.14) exercises **different geometries**.
+- Three custom markers in `pyproject.toml`:
+  - `footage` — opt-in real-video validation. Requires `OPTIPILOT_VIDEO_DIR`; **skips cleanly** when unset or when the corpus has no `anotacion_linea.json` (T027).
   - `perf` — latency benchmark, non-blocking by default.
+  - `cnn` — real ONNX smoke test (`tests/integration/test_clasificador_cnn_real.py`); skips if the model or the external dataset is absent.
 - Notable production bug found by T026 and fixed: `Referencia.cargar` raised `ConfiguracionInvalidaError` with a single argument while the constructor requires `(campo, motivo)`.
 
 ---
@@ -584,7 +606,7 @@ The repo ships four synchronized trees of OpenSpec-generated instruction files, 
 
 Given the current state (pipeline implemented, actuator boundary open), the real impact map is about *where change lands*:
 
-- Touching **`src/vision/`** → you are changing the deployed behavior that the 428 tests measure; any edit must map to an allowed technique (§10), stay explainable (§4 criteria 5 & 9), and keep `tests/unit/` + `tests/integration/` green. Changing `roi_linea`, `rango_hsv_linea` or the shape filters alters SC-010 and SC-001/002/003 simultaneously.
+- Touching **`src/vision/`** → you are changing the deployed behavior that the 538 tests measure; any edit must map to an allowed technique (§10), stay explainable (§4 criteria 5 & 9), and keep `tests/unit/` + `tests/integration/` green. Changing `roi_linea`, `rango_hsv_linea` or the shape filters alters SC-010 and SC-001/002/003 simultaneously.
 - Touching **`src/vision/configuracion.py`** or **`config/vision.json`** → every test that builds `ParametrosConfiguracion` is affected; validation happens at load time and a malformed value raises.
 - Adding a **dependency** → update `pyproject.toml [project].dependencies`; the env is uv-managed and `uv.lock` is versioned, so run `uv sync` after the change; a new dep must be a classical-CV library, never a learned model (§11). Note the robot link needs **no** third-party dependency today (standard-library `socket`).
 - Touching **`documents/**`** → you are editing the academic source of truth (originals + transcriptions). Prefer appending corrections; never silently rewrite.
@@ -640,7 +662,7 @@ Given the current state (pipeline implemented, actuator boundary open), the real
 
 Recorded during the audit; each item is factual with evidence:
 
-1. **Documentation vs code:** Reto 1 describes a complete real-time autonomous system; the codebase is a scaffold with a sample script. The gap is total, not partial. **RESOLVED by Fases 3–7 and feature 002**: the pipeline, FSM, metrics, CLI, trajectory control, compositor, transport queue and 428 tests now exist; what remains is validation on the real robot and the poster.
+1. **Documentation vs code:** Reto 1 describes a complete real-time autonomous system; the codebase is a scaffold with a sample script. The gap is total, not partial. **RESOLVED by Fases 3–7, feature 002 and feature 004**: the pipeline, FSM, metrics, CLI, trajectory control, compositor, transport queue, optional CNN and 538 tests now exist; what remains is validation on the real robot and the poster.
 2. **Empty packages with architectural names:** `src/models/`, `src/services/` exist but contain nothing; the names imply an architecture that has not been designed anywhere. **STILL TRUE** — the real code lives in `src/vision/`; the two folders remain 0-byte markers.
 3. **Environment vs materials:** the class notebooks require `cv2` (+ `sklearn` in nb4); `.venv` has `sklearn` but **not** `cv2`, and `pyproject.toml` declares no dependencies — the local environment cannot run the materials, and is not reproducible from the repo. **PARTLY RESOLVED**: `opencv-python-headless` is now declared and installed, so the notebooks run; and `uv.lock` is committed, so the environment is reproducible with `uv sync`.
 4. **Stored notebook failure:** `4_Kmeans_Imagenes.ipynb`'s last execution crashed with `ModuleNotFoundError: No module named 'google.colab'` (Colab-only import) — the notebook was last run in the wrong environment. **STILL TRUE in the file** (historical artifact, not a project blocker).
@@ -666,6 +688,12 @@ Recorded during the audit; each item is factual with evidence:
 19. **Feature 001 docs drifted from the recalibrated ROI (recorded, not fixed).** `specs/001-cv-sign-detection/data-model.md` still documents `roi_linea.y = 0.55`, obsolete since the recalibration to `0.10` (commit `7f0990c`, §16.1). 001 is frozen; the conflict is recorded here by Principle VI rather than editing 001. Also note the 001 checklist `plan-tecnico.md` CHK035 ("line mask has no consumer") was **closed by feature 002** on 2026-09-28: `src/vision/posicion_linea.py` consumes `mascara_linea`.
 20. **AGENTS.md itself carried a wrong module name (corrected 2026-09-28).** Earlier passes listed `src/vision/estimador_linea.py`; the module on disk is **`src/vision/posicion_linea.py`** (class `EstimadorLinea`). Found while doing T043/T044. Lesson already in the file's own §29: verify names against disk.
 21. **T040's reference numbers did not reproduce (recorded, not hidden).** The task text cited "~15–20 px in `rutaIdeal` vs ~52 px in `desarrilamiento`" for `velocidad_error_px`. Measured on the 9 real videos with the current `config/vision.json`, neither the frame-to-frame `|Δx|` (~2.5 vs ~1.7 px) nor the lateral error magnitude `|x − objetivo|` (~37 vs ~48 mean, p95 ~82 vs ~149) matches those values. The **direction** of discrimination holds for the error magnitude (desarrilamiento larger), and that is what the footage test now verifies; the literal "velocity" metric does **not** discriminate because in `desarrilamiento` the line is frequently lost (invalid position), which removes consecutive valid pairs. The exact reference definition is not recoverable from the repo, so it is recorded here rather than tuned to. Any future claim of "15–20 vs 52 px" must first restate the exact definition used.
+22. **Feature 004 implemented (2026-11-02).** Optional CNN classifier (PARE/SIGA/ZONA ESCOLAR/VELOCIDAD 60) via ONNX Runtime, plus PARE/SIGA/ZONA/VELOCIDAD cadence. The model is `assets/modelos/senales_mobilenet.onnx` (12.25 MB) + metadata. **Not validated on the physical robot or its camera.** The CNN is only valid if the teacher authorized it for this later phase; it is **not** part of the Reto 1 deliverable and would violate its rules.
+23. **CNN domain and coverage (recorded, not hidden).** On a sample of 80 dataset images, the localizer proposed a region in 63; the gated top-1 accuracy was 61/63 = **0.968**, but coverage was 63/80 = **0.762**. The misses are phone photos whose sign falls outside the `roi_senales` calibrated for the robot. On the 9 real videos (1369 sampled frames, no signs), the pipeline confirmed **0 PARE, 0 SIGA and 0 extra classes**; 390 regions were rejected by color/shape/threshold. Full-frame classification without the localizer gate produced a false `SIGA` at 95.3 % on a green blob, so the gate and the color/shape filters are mandatory.
+24. **CNN color/shape gates are part of the contract, not tuning.** Every prediction must be coherent with the mask that proposed it (PARE/VELOCIDAD ← red, SIGA ← green, ZONA ← yellow). PARE/SIGA require 7–9 vertices, ZONA ≥ 5, VELOCIDAD ≥ 6. Without these gates, a 4-vertex green blob was classified as SIGA (89 %) and a 4-vertex yellow area as ZONA (96.9 %). The gates are in `PipelineVision._clase_coherente`.
+25. **ONNX Runtime threading matters (recorded 2026-11-02).** Default `intra_op_num_threads=0` measured **35.8 ms** mean for MobileNet on the development laptop; forcing 4 threads measured **10.6 ms** mean, **13.64 ms** p95. `ClasificadorONNX` sets 4 intra-op threads and 1 inter-op thread. The CLI with CNN measured 9.48 ms mean / 14.66 ms p95 over 60 frames.
+26. **Cadence is a software contract, not yet a hardware fact.** PARE `x` 3.0 s; SIGA `w` 1.0 s; ZONA `w` 2.0 s; VELOCIDAD `w` 0.5 s; corrections `a`/`d` keep `fotogramas_por_orden`. It assumes the mBot treats each `w` as a step and that spacing modulates speed. If the firmware moves continuously, the interval will not change speed; validate on the physical robot.
+27. **Spec numbering.** Feature 003 (signal crossing, `d53552e`) was implemented without a `specs/003-*` folder; feature 004 is the CNN/cadence work in `specs/004-clasificador-senales-cnn/`. Spec 004 was written manually with the Spec Kit templates, not with OpenSpec; `openspec list --json` is still empty.
 
 ---
 
@@ -676,6 +704,9 @@ Recorded during the audit; each item is factual with evidence:
 - PARE stop duration and "intentos" (attempts) count are teacher-defined and absent here.
 - The annotated reference corpus (SC-010) does not exist, so SC-001/002/003/010 are **not evaluable**; T027 skips cleanly rather than reporting a number.
 - The camera mounting/orientation on the real robot is unknown, and the practice footage is portrait/downward-looking, which does not match the ROI geometry in `config/vision.json`.
+- The CNN was trained on phone photos, not on the robot camera; its 0.968 gated accuracy and 0.762 coverage are dataset measurements, not a guarantee on the track.
+- The cadence (`w` every 1.0/2.0/0.5 s) assumes the mBot treats each `w` as a step; it has not been validated on hardware.
+- The CNN is only valid if the teacher authorized it for this phase; it is not part of the Reto 1 rules.
 - Environment: repo now on `D:` (was OneDrive); `.venv` is large (234 MB) and git-ignored.
 - No product CI, no lint/format tooling, no `README`/`LICENSE`/`CONTRIBUTING`.
 

@@ -176,7 +176,7 @@ def test_sin_latencia_informada_la_lista_queda_vacia() -> None:
 
 
 def test_las_metricas_de_control_no_tocan_metricas_corrida() -> None:
-    """FR-026: ``MetricasCorrida`` conserva su resumen exacto de 001."""
+    """FR-026: ``MetricasCorrida`` conserva las claves de 001 y añade las de CNN."""
     from src.vision.metricas import MetricasCorrida
 
     resumen = MetricasCorrida("c", "f").resumen()
@@ -196,4 +196,7 @@ def test_las_metricas_de_control_no_tocan_metricas_corrida() -> None:
         "fps_promedio",
         "latencia_media_ms",
         "latencia_p95_ms",
+        "clasificaciones_cnn",
+        "predicciones_rechazadas_cnn",
+        "modo_marcha",
     }

@@ -41,6 +41,9 @@ CLAVES_RESUMEN = {
     "fps_promedio",
     "latencia_media_ms",
     "latencia_p95_ms",
+    "clasificaciones_cnn",
+    "predicciones_rechazadas_cnn",
+    "modo_marcha",
 }
 
 
@@ -92,6 +95,9 @@ def test_resumen_vacio_no_omite_ninguna_clave() -> None:
     assert resumen["fps_promedio"] == 0.0
     assert resumen["latencia_media_ms"] == 0.0
     assert resumen["latencia_p95_ms"] == 0.0
+    assert resumen["clasificaciones_cnn"] == {}
+    assert resumen["predicciones_rechazadas_cnn"] == 0
+    assert resumen["modo_marcha"] == "SIGA"
 
 
 # -- conteos de ocurrencias -------------------------------------------------

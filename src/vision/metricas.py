@@ -23,10 +23,12 @@ from pathlib import Path
 from .modelos import (
     CausaComando,
     ClaseSenal,
+    ClasificacionCNN,
     ComandoMovimiento,
     DecisionCompuesta,
     EventoSenal,
     MarcadorVisibilidadPlena,
+    ModoMarcha,
     Parada,
     SenalConfirmada,
     TipoEvento,
@@ -50,6 +52,9 @@ _CLAVES_RESUMEN = (
     "fps_promedio",
     "latencia_media_ms",
     "latencia_p95_ms",
+    "clasificaciones_cnn",
+    "predicciones_rechazadas_cnn",
+    "modo_marcha",
 )
 
 
@@ -111,6 +116,9 @@ class MetricasCorrida:
         self._falsos_positivos = 0
         self._confusiones = 0
         self._t_ultimo: float | None = None
+        self._confianzas_cnn: dict[str, list[float]] = {}
+        self._rechazadas_cnn = 0
+        self._modo_marcha = ModoMarcha.SIGA
 
     # -- registro -----------------------------------------------------------
 
@@ -173,6 +181,23 @@ class MetricasCorrida:
     def registrar_parada(self, parada: Parada) -> None:
         """Registra una detención completa con su retardo de reanudación (SC-008)."""
         self._paradas.append(parada)
+
+    def registrar_clasificacion(self, clasificacion: ClasificacionCNN) -> None:
+        """Acumula una predicción CNN aceptada para el resumen (specs/004)."""
+        clase = clasificacion.prediccion.clase
+        self._confianzas_cnn.setdefault(clase, []).append(
+            float(clasificacion.prediccion.confianza)
+        )
+
+    def registrar_rechazos_cnn(self, cantidad: int) -> None:
+        """Suma predicciones descartadas por umbral o etiqueta desconocida."""
+        if cantidad < 0:
+            raise ValueError("cantidad debe ser >= 0")
+        self._rechazadas_cnn += int(cantidad)
+
+    def registrar_modo_marcha(self, modo: ModoMarcha) -> None:
+        """Guarda el último modo de marcha visto en la corrida."""
+        self._modo_marcha = modo
 
     def registrar_decision_latencia(self, frames: int, ms: float) -> None:
         """Latencia de decisión por ocurrencia: de visibilidad plena a la decisión."""
@@ -243,6 +268,17 @@ class MetricasCorrida:
                 else 0.0
             ),
             "latencia_p95_ms": _percentil(self._latencias_procesamiento, 95.0),
+            "clasificaciones_cnn": {
+                clase: {
+                    "conteo": len(confianzas),
+                    "confianza_media": (
+                        sum(confianzas) / len(confianzas) if confianzas else 0.0
+                    ),
+                }
+                for clase, confianzas in sorted(self._confianzas_cnn.items())
+            },
+            "predicciones_rechazadas_cnn": self._rechazadas_cnn,
+            "modo_marcha": str(self._modo_marcha),
         }
 
     def exportar(self, directorio: Path) -> tuple[Path, Path]:

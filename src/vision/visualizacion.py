@@ -40,6 +40,9 @@ _COLOR_MANUAL = (0, 165, 255)
 _COLOR_AUTO = (0, 255, 0)
 _COLOR_ROI_LINEA = (0, 255, 255)
 _COLOR_ROI_SENALES = (255, 128, 0)
+_COLOR_CNN_EXTRA = (0, 255, 255)
+_COLOR_CNN_VELOCIDAD = (255, 0, 255)
+_COLOR_MARCHA = (255, 255, 0)
 
 #: Recordatorio de teclas para la demostración en vivo (se dibuja abajo a la
 #: derecha). Sin esto, en plena pista nadie recuerda el mapa de teclas.
@@ -99,6 +102,34 @@ def _dibujar_confirmadas(anotada: np.ndarray, resultado: ResultadoProcesamiento)
         color = _color_de_clase(senal.clase)
         cv2.circle(anotada, senal.centro_px, 6, color, -1)
         _texto(anotada, f"{senal.clase} CONF oc={senal.ocurrencia_id}", (8, 20))
+
+
+def _color_de_prediccion(clase: str) -> tuple[int, int, int]:
+    if clase == "PARE":
+        return _COLOR_PARE
+    if clase == "SIGA":
+        return _COLOR_SIGA
+    if clase == "VELOCIDAD 60":
+        return _COLOR_CNN_VELOCIDAD
+    return _COLOR_CNN_EXTRA
+
+
+def _dibujar_clasificaciones_cnn(
+    anotada: np.ndarray, resultado: ResultadoProcesamiento
+) -> None:
+    """Caja, clase y confianza de cada predicción aceptada (specs/004)."""
+    for clasificacion in resultado.clasificaciones_cnn:
+        x, y, ancho, alto = clasificacion.caja_px
+        prediccion = clasificacion.prediccion
+        color = _color_de_prediccion(prediccion.clase)
+        cv2.rectangle(anotada, (x, y), (x + ancho, y + alto), color, 2)
+        etiqueta = f"{prediccion.clase} {prediccion.confianza * 100:.0f}%"
+        _texto(anotada, etiqueta, (max(0, x), max(12, y - 4)))
+
+
+def _dibujar_modo_marcha(anotada: np.ndarray, resultado: ResultadoProcesamiento) -> None:
+    """Modo de marcha vigente, para explicar la cadencia en la demo."""
+    _texto(anotada, f"MARCHA: {resultado.modo_marcha}", (8, 58))
 
 
 def _dibujar_estado(anotada: np.ndarray, estado: ResultadoEstado) -> None:
@@ -290,6 +321,8 @@ def anotar(
     _dibujar_rois(anotada, segmentacion)
     _dibujar_candidatos(anotada, resultado)
     _dibujar_confirmadas(anotada, resultado)
+    _dibujar_clasificaciones_cnn(anotada, resultado)
+    _dibujar_modo_marcha(anotada, resultado)
     if params is not None:
         _dibujar_control(anotada, resultado, params, decision, comando_mostrado, modo)
     if estado is not None:
